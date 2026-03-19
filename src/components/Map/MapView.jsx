@@ -15,6 +15,7 @@ import { useOverpassWaterways } from '../../hooks/useOverpassWaterways';
 import { useAccessPoints } from '../../hooks/useAccessPoints';
 import { useTroutWaters } from '../../hooks/useTroutWaters';
 import { usePublicLands } from '../../hooks/usePublicLands';
+import { useFishingEasements } from '../../hooks/useFishingEasements';
 import { countyBounds, defaultView } from '../../data/countyBounds';
 import { specialWaterways } from '../../data/regulations2026';
 
@@ -35,11 +36,11 @@ const accessIcon = L.divIcon({
   popupAnchor: [0, -10],
 });
 
-// Public land styles
+// Public land styles — each type uses a distinct color family
 const publicLandStyles = {
-  'State Game Land': { color: '#15803d', weight: 1, fillColor: '#86efac', fillOpacity: 0.35 },
-  'State Forest':   { color: '#166534', weight: 1, fillColor: '#4ade80', fillOpacity: 0.3  },
-  'State Park':     { color: '#065f46', weight: 1, fillColor: '#34d399', fillOpacity: 0.35 },
+  'State Game Land': { color: '#65a30d', weight: 1, fillColor: '#a3e635', fillOpacity: 0.40 }, // lime/yellow-green
+  'State Forest':    { color: '#166534', weight: 1, fillColor: '#dcfce7', fillOpacity: 0.50 }, // very pale mint
+  'State Park':      { color: '#0369a1', weight: 1, fillColor: '#bae6fd', fillOpacity: 0.45 }, // sky blue
 };
 
 function getPublicLandStyle(feature) {
@@ -64,8 +65,9 @@ function publicLandOnEachFeature(feature, layer) {
 // GeoJSON styles
 const waterwayLineStyle = { color: '#3b82f6', weight: 1.5, opacity: 0.7 };
 const waterwayPolyStyle = { color: '#1d4ed8', weight: 1, fillColor: '#60a5fa', fillOpacity: 0.4 };
-const troutStreamStyle = { color: '#0d9488', weight: 2.5, opacity: 0.85, dashArray: '8 4' };
-const troutLakeStyle = { color: '#0d9488', weight: 2, fillColor: '#5eead4', fillOpacity: 0.35 };
+const troutStreamStyle = { color: '#f97316', weight: 2.5, opacity: 0.9, dashArray: '8 4' };  // orange — distinct from blue waterways
+const troutLakeStyle   = { color: '#ea580c', weight: 2, fillColor: '#fed7aa', fillOpacity: 0.45 }; // peach/orange
+const easementStyle    = { color: '#9333ea', weight: 3, opacity: 0.88, dashArray: '5 3' }; // purple
 const countyStyle = { color: '#1e40af', weight: 2.5, fillOpacity: 0, dashArray: '8 5' };
 
 function getWaterwayStyle(feature) {
@@ -76,6 +78,10 @@ function getWaterwayStyle(feature) {
 function getTroutStyle(feature) {
   const t = feature.geometry?.type;
   return t === 'Polygon' || t === 'MultiPolygon' ? troutLakeStyle : troutStreamStyle;
+}
+
+function getEasementStyle() {
+  return easementStyle;
 }
 
 // Fly to county when selection changes
@@ -167,18 +173,20 @@ export default function MapView() {
   const [county, setCounty] = useState('all');
   const [countyGeoJSON, setCountyGeoJSON] = useState(null);
   const [layers, setLayers] = useState([
-    { id: 'publicLands', label: 'Public Lands', visible: true, color: '#16a34a' },
-    { id: 'nhd', label: 'USGS Hydrography', visible: true, color: '#3b82f6' },
-    { id: 'osmWaterways', label: 'OSM Waterways', visible: true, color: '#60a5fa' },
-    { id: 'troutWaters', label: 'Stocked Trout Waters', visible: true, color: '#0d9488' },
-    { id: 'accessPoints', label: 'PFBC Access Points', visible: true, color: '#1d4ed8' },
-    { id: 'countyBounds', label: 'County Boundaries', visible: true, color: '#1e40af' },
+    { id: 'publicLands',      label: 'Public Lands',              visible: true,  color: '#65a30d' },
+    { id: 'fishingEasements', label: 'PFBC Fishing Easements',    visible: true,  color: '#9333ea' },
+    { id: 'nhd',              label: 'USGS Hydrography',          visible: true,  color: '#3b82f6' },
+    { id: 'osmWaterways',     label: 'OSM Waterways',             visible: true,  color: '#60a5fa' },
+    { id: 'troutWaters',      label: 'Stocked Trout Waters',      visible: true,  color: '#f97316' },
+    { id: 'accessPoints',     label: 'PFBC Access Points',        visible: true,  color: '#1d4ed8' },
+    { id: 'countyBounds',     label: 'County Boundaries',         visible: true,  color: '#1e40af' },
   ]);
 
   const { data: waterwayData, isLoading: waterwaysLoading } = useOverpassWaterways(county);
   const { data: accessData } = useAccessPoints(county);
   const { data: troutData } = useTroutWaters(county);
   const { data: publicLandsData } = usePublicLands(county);
+  const { data: easementsData } = useFishingEasements(county);
 
   useEffect(() => {
     fetchCountyBoundaries().then(setCountyGeoJSON);
@@ -224,6 +232,39 @@ export default function MapView() {
               data={publicLandsData}
               style={getPublicLandStyle}
               onEachFeature={publicLandOnEachFeature}
+            />
+          )}
+
+          {/* PFBC Public Fishing Easements */}
+          {isVisible('fishingEasements') && easementsData?.features?.length > 0 && (
+            <GeoJSON
+              key={`easements-${county}-${easementsData.features.length}`}
+              data={easementsData}
+              style={getEasementStyle}
+              onEachFeature={(feature, layer) => {
+                const p = feature.properties;
+                const name = p?.name || 'PFBC Fishing Easement';
+                layer.bindTooltip(name, { permanent: false, direction: 'top', className: 'text-xs' });
+                layer.on('click', function (e) {
+                  L.popup({ maxWidth: 320 })
+                    .setLatLng(e.latlng)
+                    .setContent(`
+                      <div style="min-width:210px;max-width:290px;font-family:system-ui,sans-serif">
+                        <h3 style="font-weight:700;color:#581c87;font-size:14px;margin:0 0 6px">${name}</h3>
+                        <span style="background:#f3e8ff;color:#7e22ce;font-size:11px;padding:2px 8px;border-radius:999px">PFBC Public Fishing Easement</span>
+                        ${p?.description ? `<p style="font-size:11px;color:#374151;margin:6px 0 4px">${p.description}</p>` : ''}
+                        ${p?.targetSpecies ? `<p style="font-size:11px;color:#374151;margin:2px 0"><b>Target species:</b> ${p.targetSpecies}</p>` : ''}
+                        ${p?.permitRequired ? `<p style="font-size:11px;color:#b45309;font-weight:600;margin:4px 0">&#9888; ${p.permitRequired}</p>` : ''}
+                        <a href="${p?.pfbcLink || 'https://www.pa.gov/agencies/fishandboat/fishing/regulations'}"
+                           target="_blank" rel="noopener noreferrer"
+                           style="display:inline-block;margin-top:6px;font-size:11px;color:#7e22ce;font-weight:600;text-decoration:none">
+                          View PFBC Info &#8599;
+                        </a>
+                      </div>
+                    `)
+                    .openOn(e.target._map);
+                });
+              }}
             />
           )}
 
@@ -357,44 +398,49 @@ export default function MapView() {
           <p className="font-semibold text-gray-700 uppercase tracking-wide text-xs mb-1">
             Legend
           </p>
+          {/* Public Lands */}
           <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 rounded-sm border border-green-700" style={{ background: 'rgba(134,239,172,0.5)' }} />
-            <span className="text-gray-600">Public Land (Game Lands)</span>
+            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(163,230,53,0.5)', border: '1.5px solid #65a30d' }} />
+            <span className="text-gray-600">State Game Land</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 rounded-sm border border-green-800" style={{ background: 'rgba(74,222,128,0.45)' }} />
+            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(220,252,231,0.7)', border: '1.5px solid #166534' }} />
             <span className="text-gray-600">State Forest</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 rounded-sm border border-emerald-800" style={{ background: 'rgba(52,211,153,0.45)' }} />
+            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(186,230,253,0.6)', border: '1.5px solid #0369a1' }} />
             <span className="text-gray-600">State Park</span>
           </div>
+          {/* Waterways */}
           <div className="flex items-center gap-2">
-            <span className="inline-block w-5 h-0.5 bg-blue-400" />
+            <span className="inline-block" style={{ display: 'inline-block', width: 20, height: 0, borderTop: '2px solid #60a5fa' }} />
             <span className="text-gray-600">Rivers / Streams (OSM)</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 bg-blue-300 border border-blue-500 rounded-sm" />
+            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(147,197,253,0.5)', border: '1.5px solid #3b82f6' }} />
             <span className="text-gray-600">Lakes / Ponds</span>
           </div>
+          {/* Trout */}
           <div className="flex items-center gap-2">
-            <span
-              className="inline-block w-5 h-0"
-              style={{
-                borderTop: '2px dashed #0d9488',
-                display: 'inline-block',
-                width: 20,
-                height: 0,
-              }}
-            />
-            <span className="text-gray-600">Stocked Trout Waters</span>
+            <span className="inline-block" style={{ display: 'inline-block', width: 20, height: 0, borderTop: '2.5px dashed #f97316' }} />
+            <span className="text-gray-600">Stocked Trout Streams</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block w-3 h-3 bg-blue-700 rounded-full border-2 border-white shadow" />
+            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(254,215,170,0.6)', border: '1.5px solid #ea580c' }} />
+            <span className="text-gray-600">Stocked Trout Lakes</span>
+          </div>
+          {/* Easements */}
+          <div className="flex items-center gap-2">
+            <span className="inline-block" style={{ display: 'inline-block', width: 20, height: 0, borderTop: '3px dashed #9333ea' }} />
+            <span className="text-gray-600">PFBC Fishing Easement</span>
+          </div>
+          {/* Points */}
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-3 h-3 rounded-full border-2 border-white shadow" style={{ background: '#1d4ed8' }} />
             <span className="text-gray-600">PFBC Access Point</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block w-5 border-t-2 border-dashed border-blue-800" />
+            <span className="inline-block" style={{ display: 'inline-block', width: 20, height: 0, borderTop: '2px dashed #1e40af' }} />
             <span className="text-gray-600">County Boundary</span>
           </div>
         </div>
