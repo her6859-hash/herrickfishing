@@ -37,14 +37,17 @@ const accessIcon = L.divIcon({
 });
 
 // Public land styles — each type uses a distinct color family
-const publicLandStyles = {
-  'State Game Land': { color: '#65a30d', weight: 1, fillColor: '#a3e635', fillOpacity: 0.40 }, // lime/yellow-green
-  'State Forest':    { color: '#166534', weight: 1, fillColor: '#dcfce7', fillOpacity: 0.50 }, // very pale mint
-  'State Park':      { color: '#0369a1', weight: 1, fillColor: '#bae6fd', fillOpacity: 0.45 }, // sky blue
-};
+function makePublicLandStyles(hl) {
+  return {
+    'State Game Land': { color: '#65a30d', weight: hl ? 2 : 1, fillColor: '#a3e635', fillOpacity: hl ? 0.65 : 0.40 },
+    'State Forest':    { color: '#166534', weight: hl ? 2 : 1, fillColor: '#dcfce7', fillOpacity: hl ? 0.75 : 0.50 },
+    'State Park':      { color: '#0369a1', weight: hl ? 2 : 1, fillColor: '#bae6fd', fillOpacity: hl ? 0.70 : 0.45 },
+  };
+}
 
-function getPublicLandStyle(feature) {
-  return publicLandStyles[feature.properties?._landType] || publicLandStyles['State Game Land'];
+function makeGetPublicLandStyle(hl) {
+  const styles = makePublicLandStyles(hl);
+  return (feature) => styles[feature.properties?._landType] || styles['State Game Land'];
 }
 
 function publicLandOnEachFeature(feature, layer) {
@@ -62,26 +65,38 @@ function publicLandOnEachFeature(feature, layer) {
   `);
 }
 
-// GeoJSON styles
-const waterwayLineStyle = { color: '#3b82f6', weight: 1.5, opacity: 0.7 };
-const waterwayPolyStyle = { color: '#1d4ed8', weight: 1, fillColor: '#60a5fa', fillOpacity: 0.4 };
-const troutStreamStyle = { color: '#f97316', weight: 2.5, opacity: 0.9, dashArray: '8 4' };  // orange — distinct from blue waterways
-const troutLakeStyle   = { color: '#ea580c', weight: 2, fillColor: '#fed7aa', fillOpacity: 0.45 }; // peach/orange
-const easementStyle    = { color: '#9333ea', weight: 3, opacity: 0.88, dashArray: '5 3' }; // purple
+// GeoJSON styles — normal (all counties) vs highlighted (single county selected)
+function makeStyles(hl) {
+  return {
+    waterwayLine: { color: '#3b82f6', weight: hl ? 3   : 1.5, opacity: hl ? 1   : 0.7 },
+    waterwayPoly: { color: '#1d4ed8', weight: hl ? 2   : 1,   fillColor: '#60a5fa', fillOpacity: hl ? 0.65 : 0.4 },
+    troutStream:  { color: '#f97316', weight: hl ? 4   : 2.5, opacity: hl ? 1   : 0.9, dashArray: '8 4' },
+    troutLake:    { color: '#ea580c', weight: hl ? 3   : 2,   fillColor: '#fed7aa', fillOpacity: hl ? 0.7  : 0.45 },
+    easement:     { color: '#9333ea', weight: hl ? 5   : 3,   opacity: hl ? 1   : 0.88, dashArray: '5 3' },
+  };
+}
+
 const countyStyle = { color: '#1e40af', weight: 2.5, fillOpacity: 0, dashArray: '8 5' };
 
-function getWaterwayStyle(feature) {
-  const t = feature.geometry?.type;
-  return t === 'Polygon' || t === 'MultiPolygon' ? waterwayPolyStyle : waterwayLineStyle;
+function makeGetWaterwayStyle(hl) {
+  const s = makeStyles(hl);
+  return (feature) => {
+    const t = feature.geometry?.type;
+    return t === 'Polygon' || t === 'MultiPolygon' ? s.waterwayPoly : s.waterwayLine;
+  };
 }
 
-function getTroutStyle(feature) {
-  const t = feature.geometry?.type;
-  return t === 'Polygon' || t === 'MultiPolygon' ? troutLakeStyle : troutStreamStyle;
+function makeGetTroutStyle(hl) {
+  const s = makeStyles(hl);
+  return (feature) => {
+    const t = feature.geometry?.type;
+    return t === 'Polygon' || t === 'MultiPolygon' ? s.troutLake : s.troutStream;
+  };
 }
 
-function getEasementStyle() {
-  return easementStyle;
+function makeGetEasementStyle(hl) {
+  const s = makeStyles(hl);
+  return () => s.easement;
 }
 
 // Fly to county when selection changes
@@ -197,6 +212,7 @@ export default function MapView() {
   }
 
   const isVisible = (id) => layers.find((l) => l.id === id)?.visible;
+  const hl = county !== 'all'; // highlight mode when a specific county is selected
 
   return (
     <div className="flex flex-col h-full">
@@ -230,7 +246,7 @@ export default function MapView() {
             <GeoJSON
               key={`publicLands-${county}-${publicLandsData.features.length}`}
               data={publicLandsData}
-              style={getPublicLandStyle}
+              style={makeGetPublicLandStyle(hl)}
               onEachFeature={publicLandOnEachFeature}
             />
           )}
@@ -240,7 +256,7 @@ export default function MapView() {
             <GeoJSON
               key={`easements-${county}-${easementsData.features.length}`}
               data={easementsData}
-              style={getEasementStyle}
+              style={makeGetEasementStyle(hl)}
               onEachFeature={(feature, layer) => {
                 const p = feature.properties;
                 const name = p?.name || 'PFBC Fishing Easement';
@@ -313,7 +329,7 @@ export default function MapView() {
             <GeoJSON
               key={`osm-${county}-${waterwayData.features?.length}`}
               data={waterwayData}
-              style={getWaterwayStyle}
+              style={makeGetWaterwayStyle(hl)}
               onEachFeature={waterwayOnEachFeature}
             />
           )}
@@ -323,7 +339,7 @@ export default function MapView() {
             <GeoJSON
               key={`trout-${county}-${troutData.features.length}`}
               data={troutData}
-              style={getTroutStyle}
+              style={makeGetTroutStyle(hl)}
               onEachFeature={waterwayOnEachFeature}
             />
           )}
