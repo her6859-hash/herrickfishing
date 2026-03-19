@@ -26,10 +26,16 @@ export default function SpecialWaters() {
             </div>
           </div>
 
+          {w.permitRequired && (
+            <div className="mb-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 text-xs text-amber-800 font-medium">
+              ⚠️ {w.permitRequired}
+            </div>
+          )}
+
           <div className="space-y-1 mb-3">
             {Object.entries(w.rules).map(([species, rule]) => (
               <div key={species} className="flex justify-between text-xs gap-2">
-                <span className="font-medium text-gray-700 capitalize">{species}</span>
+                <span className="font-medium text-gray-700 capitalize flex-shrink-0">{species}</span>
                 <span className="text-gray-600 text-right">{rule}</span>
               </div>
             ))}

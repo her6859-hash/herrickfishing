@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { generalInfo } from '../../data/regulations2026';
 import SpeciesTable from './SpeciesTable';
 import SpecialWaters from './SpecialWaters';
+import LicenseInfo from './LicenseInfo';
 
-function Section({ title, defaultOpen, children }) {
+function Section({ title, defaultOpen, badge, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -11,7 +12,14 @@ function Section({ title, defaultOpen, children }) {
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left transition-colors"
       >
-        <span className="font-semibold text-gray-900">{title}</span>
+        <span className="font-semibold text-gray-900 flex items-center gap-2">
+          {title}
+          {badge && (
+            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-normal">
+              {badge}
+            </span>
+          )}
+        </span>
         <span className="text-gray-400 text-lg leading-none">{open ? '▲' : '▼'}</span>
       </button>
       {open && <div className="p-4">{children}</div>}
@@ -28,6 +36,9 @@ export default function RegulationsPanel() {
         <p className="text-blue-200 text-sm">
           Erie · Warren · Crawford Counties &nbsp;|&nbsp; PA Fish &amp; Boat Commission
         </p>
+        <p className="text-blue-300 text-xs mt-1">
+          Always verify current rules at the official PFBC website before fishing.
+        </p>
         <a
           href={generalInfo.pfbcLink}
           target="_blank"
@@ -38,41 +49,39 @@ export default function RegulationsPanel() {
         </a>
       </div>
 
-      {/* Key Dates & License Info */}
-      <Section title="License Requirements &amp; Key 2026 Dates" defaultOpen={true}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <h4 className="font-semibold text-gray-800 mb-2 text-sm">License Requirements</h4>
-            <p className="text-sm text-gray-600 mb-1">{generalInfo.licenseRequired}</p>
-            <p className="text-sm text-gray-600">{generalInfo.licenseNote}</p>
-          </div>
-          <div>
-            <h4 className="font-semibold text-gray-800 mb-2 text-sm">Key 2026 Dates</h4>
-            <div className="space-y-1.5">
-              {Object.entries(generalInfo.keyDates).map(([key, value]) => (
-                <div key={key} className="flex gap-2 text-sm">
-                  <span className="text-blue-600 font-medium whitespace-nowrap">📅</span>
-                  <div>
-                    <span className="font-medium text-gray-700 capitalize">
-                      {key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}:
-                    </span>{' '}
-                    <span className="text-gray-600">{value}</span>
-                  </div>
-                </div>
-              ))}
+      {/* Key Dates */}
+      <Section title="Key 2026 Dates" defaultOpen={true} badge="Season Opener Apr 4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {Object.entries(generalInfo.keyDates).map(([key, value]) => (
+            <div key={key} className="flex gap-3 items-start">
+              <span className="text-lg flex-shrink-0">📅</span>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  {key.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase())}
+                </p>
+                <p className="text-sm text-gray-800">{value}</p>
+              </div>
             </div>
-          </div>
+          ))}
         </div>
-        <div className="mt-3 bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800">
+        <div className="mt-4 bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800">
           <strong>Trout Stocking 2026:</strong> {generalInfo.troutStocking}
+        </div>
+        <div className="mt-2 bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-900">
+          <strong>Bass No-Harvest Period:</strong> April 11 – June 12, 2026. Bass must be
+          immediately released during this period on all waters statewide.
         </div>
       </Section>
 
-      {/* Species Size & Creel Limits */}
-      <Section title="2026 Size &amp; Creel Limits by Species" defaultOpen={true}>
+      {/* License & Permits */}
+      <Section title="License &amp; Permit Fees" defaultOpen={false} badge="2026">
+        <LicenseInfo />
+      </Section>
+
+      {/* Species Limits */}
+      <Section title="Species Size &amp; Creel Limits" defaultOpen={true}>
         <p className="text-xs text-gray-500 mb-3">
-          These are general statewide limits. Special regulations may apply on designated waters.
-          Always verify with the{' '}
+          General statewide limits. Special regulations apply on designated waters — verify with{' '}
           <a
             href={generalInfo.pfbcLink}
             target="_blank"
@@ -86,11 +95,15 @@ export default function RegulationsPanel() {
         <SpeciesTable />
       </Section>
 
-      {/* Special Named Waterways */}
-      <Section title="Special Waterways — Erie, Warren &amp; Crawford Counties" defaultOpen={true}>
+      {/* Special Waterways */}
+      <Section
+        title="Special Waterways — Erie, Warren &amp; Crawford"
+        defaultOpen={true}
+        badge="13 waterways"
+      >
         <p className="text-xs text-gray-500 mb-3">
-          Key regulations for notable public waterways in the three counties. Click any card for
-          the full PFBC regulations page.
+          Key regulations for notable public waterways in the three counties.
+          Waterways marked ⚠️ require an additional permit beyond the base fishing license.
         </p>
         <SpecialWaters />
       </Section>
@@ -99,33 +112,40 @@ export default function RegulationsPanel() {
       <Section title="General Rules &amp; Reminders" defaultOpen={false}>
         <ul className="space-y-2 text-sm text-gray-700 list-disc list-inside">
           <li>A valid PA Fishing License must be in your possession while fishing.</li>
-          <li>All fish must be measured from tip of mouth to tip of tail.</li>
-          <li>Daily limits reset at midnight each day.</li>
+          <li>All fish must be measured from tip of mouth to tip of tail (total length).</li>
+          <li>Daily creel limits reset at midnight each day.</li>
           <li>Catch-and-release fishing is allowed year-round on most waters.</li>
-          <li>Artificial lures only on some delayed-harvest and fly-fishing-only sections.</li>
-          <li>Some waters require a special trout/salmon permit in addition to the base license.</li>
+          <li>Artificial lures only on many Class A wild trout streams — check PFBC.</li>
           <li>
-            Lake Erie requires a Lake Erie Tributary Permit for fishing in tributary streams from
-            Oct 1 – Mar 31.
+            Lake Erie and all its tributaries (Elk Creek, Walnut Creek, Conneaut Creek, etc.)
+            require a Lake Erie Permit in addition to the base fishing license.
+          </li>
+          <li>Some waters require a Trout/Salmon Permit for trout fishing.</li>
+          <li>
+            Pymatuning Reservoir: shared PA/Ohio border water — PA regulations apply on PA side.
+            Check which state&apos;s waters you are fishing.
           </li>
           <li>
-            Pymatuning Reservoir: PA and Ohio have a compact — check which state&apos;s waters
-            you are on.
+            Kinzua Dam tailwater (Warren County) provides cold-water trout habitat year-round — check
+            for special designation.
           </li>
           <li>
-            Invasive species: Never transport water, plants, or fish between water bodies. Drain all
-            equipment before leaving.
+            Invasive species: Never transport water, plants, or bait fish between water bodies. Drain
+            all equipment, livewells, and bilges before leaving any water access area.
+          </li>
+          <li>
+            Big Bass Program and Panfish Enhancement Program waters have special size limits — check
+            the PFBC Special Regulations listing.
           </li>
         </ul>
       </Section>
 
       <p className="text-xs text-gray-400 text-center pb-4">
-        Regulations data sourced from the PA Fish &amp; Boat Commission. Always confirm current
-        rules at{' '}
+        Regulations sourced from the PA Fish &amp; Boat Commission. Confirm current rules at{' '}
         <a href={generalInfo.pfbcLink} target="_blank" rel="noopener" className="underline">
           fishandboat.com
         </a>{' '}
-        before fishing.
+        before every fishing trip.
       </p>
     </div>
   );
