@@ -14,6 +14,7 @@ import LayerControls from './LayerControls';
 import { useOverpassWaterways } from '../../hooks/useOverpassWaterways';
 import { useAccessPoints } from '../../hooks/useAccessPoints';
 import { useTroutWaters } from '../../hooks/useTroutWaters';
+import { usePublicLands } from '../../hooks/usePublicLands';
 import { countyBounds, defaultView } from '../../data/countyBounds';
 import { specialWaterways } from '../../data/regulations2026';
 
@@ -33,6 +34,32 @@ const accessIcon = L.divIcon({
   iconAnchor: [6, 6],
   popupAnchor: [0, -10],
 });
+
+// Public land styles
+const publicLandStyles = {
+  'State Game Land': { color: '#15803d', weight: 1, fillColor: '#86efac', fillOpacity: 0.35 },
+  'State Forest':   { color: '#166534', weight: 1, fillColor: '#4ade80', fillOpacity: 0.3  },
+  'State Park':     { color: '#065f46', weight: 1, fillColor: '#34d399', fillOpacity: 0.35 },
+};
+
+function getPublicLandStyle(feature) {
+  return publicLandStyles[feature.properties?._landType] || publicLandStyles['State Game Land'];
+}
+
+function publicLandOnEachFeature(feature, layer) {
+  const p = feature.properties;
+  const label = p?._label || p?._landType || 'Public Land';
+  const type = p?._landType || '';
+  const acres = p?.ACREAGE || p?.ACRES || '';
+  layer.bindPopup(`
+    <div style="font-family:system-ui,sans-serif;min-width:160px">
+      <h3 style="font-weight:700;color:#14532d;font-size:13px;margin:0 0 4px">${label}</h3>
+      <span style="background:#dcfce7;color:#166534;font-size:11px;padding:2px 8px;border-radius:999px">${type}</span>
+      ${acres ? `<p style="font-size:11px;color:#6b7280;margin:4px 0 0">~${Math.round(acres).toLocaleString()} acres</p>` : ''}
+      <p style="font-size:11px;color:#15803d;font-weight:600;margin:6px 0 0">Public land — fishing allowed</p>
+    </div>
+  `);
+}
 
 // GeoJSON styles
 const waterwayLineStyle = { color: '#3b82f6', weight: 1.5, opacity: 0.7 };
@@ -140,6 +167,7 @@ export default function MapView() {
   const [county, setCounty] = useState('all');
   const [countyGeoJSON, setCountyGeoJSON] = useState(null);
   const [layers, setLayers] = useState([
+    { id: 'publicLands', label: 'Public Lands', visible: true, color: '#16a34a' },
     { id: 'nhd', label: 'USGS Hydrography', visible: true, color: '#3b82f6' },
     { id: 'osmWaterways', label: 'OSM Waterways', visible: true, color: '#60a5fa' },
     { id: 'troutWaters', label: 'Stocked Trout Waters', visible: true, color: '#0d9488' },
@@ -150,6 +178,7 @@ export default function MapView() {
   const { data: waterwayData, isLoading: waterwaysLoading } = useOverpassWaterways(county);
   const { data: accessData } = useAccessPoints(county);
   const { data: troutData } = useTroutWaters(county);
+  const { data: publicLandsData } = usePublicLands(county);
 
   useEffect(() => {
     fetchCountyBoundaries().then(setCountyGeoJSON);
@@ -187,6 +216,16 @@ export default function MapView() {
             attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             maxZoom={19}
           />
+
+          {/* Public Lands (Game Lands, State Forests, State Parks) */}
+          {isVisible('publicLands') && publicLandsData?.features?.length > 0 && (
+            <GeoJSON
+              key={`publicLands-${county}-${publicLandsData.features.length}`}
+              data={publicLandsData}
+              style={getPublicLandStyle}
+              onEachFeature={publicLandOnEachFeature}
+            />
+          )}
 
           {/* USGS NHD: cached tile layer (background) */}
           {isVisible('nhd') && (
@@ -318,6 +357,18 @@ export default function MapView() {
           <p className="font-semibold text-gray-700 uppercase tracking-wide text-xs mb-1">
             Legend
           </p>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-4 h-3 rounded-sm border border-green-700" style={{ background: 'rgba(134,239,172,0.5)' }} />
+            <span className="text-gray-600">Public Land (Game Lands)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-4 h-3 rounded-sm border border-green-800" style={{ background: 'rgba(74,222,128,0.45)' }} />
+            <span className="text-gray-600">State Forest</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-4 h-3 rounded-sm border border-emerald-800" style={{ background: 'rgba(52,211,153,0.45)' }} />
+            <span className="text-gray-600">State Park</span>
+          </div>
           <div className="flex items-center gap-2">
             <span className="inline-block w-5 h-0.5 bg-blue-400" />
             <span className="text-gray-600">Rivers / Streams (OSM)</span>
