@@ -15,6 +15,7 @@ import FishingSpotsList from './FishingSpotsList';
 import { useOverpassWaterways } from '../../hooks/useOverpassWaterways';
 import { useAccessPoints } from '../../hooks/useAccessPoints';
 import { useTroutWaters } from '../../hooks/useTroutWaters';
+import { useWarmwaterStreams, getWarmwaterSpecies } from '../../hooks/useWarmwaterStreams';
 import { usePublicLands } from '../../hooks/usePublicLands';
 import { useFishingEasements } from '../../hooks/useFishingEasements';
 import { countyBounds, defaultView } from '../../data/countyBounds';
@@ -73,6 +74,7 @@ function makeStyles(hl) {
     waterwayPoly: { color: '#1d4ed8', weight: hl ? 2   : 1,   fillColor: '#60a5fa', fillOpacity: hl ? 0.65 : 0.4 },
     troutStream:  { color: '#f97316', weight: hl ? 4   : 2.5, opacity: hl ? 1   : 0.9, dashArray: '8 4' },
     troutLake:    { color: '#ea580c', weight: hl ? 3   : 2,   fillColor: '#fed7aa', fillOpacity: hl ? 0.7  : 0.45 },
+    warmwater:    { color: '#10b981', weight: hl ? 4   : 2.5, opacity: hl ? 1   : 0.85, dashArray: '6 3' },
     easement:     { color: '#9333ea', weight: hl ? 5   : 3,   opacity: hl ? 1   : 0.88, dashArray: '5 3' },
   };
 }
@@ -98,6 +100,11 @@ function makeGetTroutStyle(hl) {
 function makeGetEasementStyle(hl) {
   const s = makeStyles(hl);
   return () => s.easement;
+}
+
+function makeGetWarmwaterStyle(hl) {
+  const s = makeStyles(hl);
+  return () => s.warmwater;
 }
 
 // Fly to county when selection changes
@@ -235,6 +242,7 @@ export default function MapView() {
     { id: 'nhd',              label: 'USGS Waterways',        visible: true,  color: '#3b82f6' },
     { id: 'osmWaterways',     label: 'Streams & Rivers',      visible: true,  color: '#60a5fa' },
     { id: 'troutWaters',      label: 'Stocked Trout Waters',  visible: true,  color: '#f97316' },
+    { id: 'warmwaterStreams', label: 'Warmwater / Coolwater Streams', visible: true, color: '#10b981' },
     { id: 'accessPoints',     label: 'Boat Launches & Access',visible: true,  color: '#1d4ed8' },
     { id: 'countyBounds',     label: 'County Boundaries',     visible: true,  color: '#1e40af' },
   ]);
@@ -242,23 +250,26 @@ export default function MapView() {
   const { data: waterwayData,    isLoading: osmLoading,      isError: osmError      } = useOverpassWaterways(county);
   const { data: accessData,      isLoading: accessLoading,   isError: accessError   } = useAccessPoints(county);
   const { data: troutData,       isLoading: troutLoading,    isError: troutError    } = useTroutWaters(county);
+  const { data: warmwaterData,   isLoading: warmwaterLoading,isError: warmwaterError} = useWarmwaterStreams(county);
   const { data: publicLandsData, isLoading: landsLoading,    isError: landsError    } = usePublicLands(county);
   const { data: easementsData,   isLoading: easementsLoading,isError: easementsError} = useFishingEasements(county);
 
   const loadingIds = [
-    osmLoading       && 'osmWaterways',
-    accessLoading    && 'accessPoints',
-    troutLoading     && 'troutWaters',
-    landsLoading     && 'publicLands',
-    easementsLoading && 'fishingEasements',
+    osmLoading        && 'osmWaterways',
+    accessLoading     && 'accessPoints',
+    troutLoading      && 'troutWaters',
+    warmwaterLoading  && 'warmwaterStreams',
+    landsLoading      && 'publicLands',
+    easementsLoading  && 'fishingEasements',
   ].filter(Boolean);
 
   const errorIds = [
-    osmError       && 'osmWaterways',
-    accessError    && 'accessPoints',
-    troutError     && 'troutWaters',
-    landsError     && 'publicLands',
-    easementsError && 'fishingEasements',
+    osmError        && 'osmWaterways',
+    accessError     && 'accessPoints',
+    troutError      && 'troutWaters',
+    warmwaterError  && 'warmwaterStreams',
+    landsError      && 'publicLands',
+    easementsError  && 'fishingEasements',
   ].filter(Boolean);
 
   // Search across all loaded features
@@ -279,6 +290,12 @@ export default function MapView() {
         results.push({ name, type: 'Stocked Trout Water', feature: f, color: '#f97316' });
     });
 
+    warmwaterData?.features?.forEach(f => {
+      const name = f.properties?.WATER_NAME;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name, type: 'Warmwater Stream', feature: f, color: '#10b981' });
+    });
+
     accessData?.features?.forEach(f => {
       const p = f.properties;
       const name = p?.SITE_NAME || p?.name || p?.ACCESS_NAME;
@@ -287,7 +304,7 @@ export default function MapView() {
     });
 
     return results.slice(0, 8);
-  }, [searchQuery, waterwayData, troutData, accessData]);
+  }, [searchQuery, waterwayData, troutData, warmwaterData, accessData]);
 
   useEffect(() => {
     fetchCountyBoundaries().then(setCountyGeoJSON);
@@ -538,6 +555,46 @@ export default function MapView() {
               data={troutData}
               style={makeGetTroutStyle(hl)}
               onEachFeature={troutOnEachFeature}
+            />
+          )}
+
+          {/* Warmwater / Coolwater Streams (PASDA Layer 28) */}
+          {isVisible('warmwaterStreams') && warmwaterData?.features?.length > 0 && (
+            <GeoJSON
+              key={`warmwater-${county}-${warmwaterData.features.length}`}
+              data={warmwaterData}
+              style={makeGetWarmwaterStyle(hl)}
+              onEachFeature={(feature, layer) => {
+                const p = feature.properties;
+                const name = p?.WATER_NAME || 'Warmwater Stream';
+                const countyName = p?.COUNTY || '';
+                const species = getWarmwaterSpecies(p);
+                if (name) layer.bindTooltip(name, { permanent: false, direction: 'top', className: 'text-xs' });
+                layer.on('click', (e) => {
+                  const speciesHTML = species.length
+                    ? `<p style="font-size:11px;color:#374151;margin:4px 0 2px"><b>Species:</b></p>
+                       <div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">${species.map(s =>
+                         `<span style="background:#d1fae5;color:#065f46;font-size:10px;padding:1px 6px;border-radius:999px">${s}</span>`
+                       ).join('')}</div>`
+                    : '';
+                  L.popup({ maxWidth: 320 })
+                    .setLatLng(e.latlng)
+                    .setContent(`
+                      <div style="min-width:210px;max-width:290px;font-family:system-ui,sans-serif">
+                        <h3 style="font-weight:700;color:#065f46;font-size:14px;margin:0 0 4px">${name}</h3>
+                        <span style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 8px;border-radius:999px">PFBC Warmwater / Coolwater Stream</span>
+                        ${countyName ? `<p style="font-size:11px;color:#6b7280;margin:4px 0 2px">${countyName} County</p>` : ''}
+                        ${speciesHTML}
+                        <a href="https://www.pa.gov/agencies/fishandboat/fishing/regulations"
+                           target="_blank" rel="noopener noreferrer"
+                           style="display:inline-block;margin-top:4px;font-size:11px;color:#059669;font-weight:600;text-decoration:none">
+                          PFBC Regulations &#8599;
+                        </a>
+                      </div>
+                    `)
+                    .openOn(e.target._map);
+                });
+              }}
             />
           )}
 
