@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -11,6 +11,7 @@ import {
 import L from 'leaflet';
 import CountyFilter from './CountyFilter';
 import MapSidebar from './MapSidebar';
+import FishingSpotsList from './FishingSpotsList';
 import { useOverpassWaterways } from '../../hooks/useOverpassWaterways';
 import { useAccessPoints } from '../../hooks/useAccessPoints';
 import { useTroutWaters } from '../../hooks/useTroutWaters';
@@ -213,6 +214,10 @@ function waterwayOnEachFeature(feature, layer) {
   }
 }
 
+// Highlight styles for stocked waters when selected
+const TROUT_HIGHLIGHT_LINE = { color: '#facc15', weight: 8, opacity: 1, dashArray: null };
+const TROUT_HIGHLIGHT_POLY = { color: '#facc15', weight: 6, fillColor: '#fef08a', fillOpacity: 0.85 };
+
 export default function MapView() {
   const [county, setCounty] = useState('all');
   const [countyGeoJSON, setCountyGeoJSON] = useState(null);
@@ -221,6 +226,8 @@ export default function MapView() {
   const [showResults, setShowResults] = useState(false);
   const [flyTarget, setFlyTarget] = useState(null);
   const searchRef = useRef(null);
+  // Ref tracking the currently highlighted stocked-water Leaflet layer
+  const selectedTroutLayerRef = useRef(null);
 
   const [layers, setLayers] = useState([
     { id: 'publicLands',      label: 'Public Lands',          visible: true,  color: '#65a30d' },
@@ -303,6 +310,46 @@ export default function MapView() {
 
   const isVisible = (id) => layers.find((l) => l.id === id)?.visible;
   const hl = county !== 'all';
+
+  // Highlight stocked water on click + show popup
+  const troutOnEachFeature = useCallback((feature, layer) => {
+    const name = feature.properties?.WATER_NAME || feature.properties?.name || 'Stocked Water';
+    if (name) layer.bindTooltip(name, { permanent: false, direction: 'top', className: 'text-xs' });
+
+    layer.on('click', (e) => {
+      // Reset the previously highlighted layer back to its normal style
+      if (selectedTroutLayerRef.current && selectedTroutLayerRef.current !== layer) {
+        const prev = selectedTroutLayerRef.current;
+        const prevGeom = prev.feature?.geometry?.type;
+        const s = makeStyles(hl);
+        prev.setStyle(
+          (prevGeom === 'Polygon' || prevGeom === 'MultiPolygon') ? s.troutLake : s.troutStream
+        );
+      }
+      // Apply highlight to clicked layer
+      selectedTroutLayerRef.current = layer;
+      const geomType = feature.geometry?.type;
+      layer.setStyle(
+        (geomType === 'Polygon' || geomType === 'MultiPolygon')
+          ? TROUT_HIGHLIGHT_POLY
+          : TROUT_HIGHLIGHT_LINE
+      );
+      // Show popup
+      L.popup({ maxWidth: 320 })
+        .setLatLng(e.latlng)
+        .setContent(buildPopupHTML(feature.properties))
+        .openOn(e.target._map);
+    });
+  }, [hl]);
+
+  // Fly to a spot from the FishingSpotsList
+  function handleSpotClick(feature) {
+    const target = getFeatureTarget(feature);
+    if (target) setFlyTarget({ ...target, _id: Date.now() });
+    // If it's a trout feature, highlight it on the map too
+    // (the GeoJSON layer ref isn't directly accessible here, so we rely on
+    //  the user clicking the feature on the map for the highlight effect)
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -484,13 +531,13 @@ export default function MapView() {
             />
           )}
 
-          {/* Stocked Trout Waters (PASDA) */}
+          {/* Stocked Trout Waters (PASDA) — click to highlight */}
           {isVisible('troutWaters') && troutData && troutData.features?.length > 0 && (
             <GeoJSON
               key={`trout-${county}-${troutData.features.length}`}
               data={troutData}
               style={makeGetTroutStyle(hl)}
-              onEachFeature={waterwayOnEachFeature}
+              onEachFeature={troutOnEachFeature}
             />
           )}
 
@@ -562,6 +609,14 @@ export default function MapView() {
           onLayerToggle={toggleLayer}
           loadingIds={loadingIds}
           errorIds={errorIds}
+        />
+
+        {/* Fishing Spots list panel (left side) */}
+        <FishingSpotsList
+          troutData={troutData}
+          accessData={accessData}
+          easementsData={easementsData}
+          onSpotClick={handleSpotClick}
         />
       </div>
     </div>
