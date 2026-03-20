@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -10,7 +10,7 @@ import {
 } from 'react-leaflet';
 import L from 'leaflet';
 import CountyFilter from './CountyFilter';
-import LayerControls from './LayerControls';
+import MapSidebar from './MapSidebar';
 import { useOverpassWaterways } from '../../hooks/useOverpassWaterways';
 import { useAccessPoints } from '../../hooks/useAccessPoints';
 import { useTroutWaters } from '../../hooks/useTroutWaters';
@@ -112,6 +112,35 @@ function FlyToCounty({ county }) {
   return null;
 }
 
+// Fly to a search result
+function FlyToTarget({ target }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!target) return;
+    if (target.bounds) {
+      map.fitBounds(target.bounds, { padding: [40, 40], maxZoom: 15, duration: 1 });
+    } else if (target.latlng) {
+      map.flyTo(target.latlng, target.zoom || 14, { duration: 1 });
+    }
+  }, [target, map]);
+  return null;
+}
+
+// Compute bounds/center from a GeoJSON feature for search fly-to
+function getFeatureTarget(feature) {
+  const geom = feature.geometry;
+  if (!geom) return null;
+  if (geom.type === 'Point') {
+    const [lng, lat] = geom.coordinates;
+    return { latlng: [lat, lng], zoom: 14 };
+  }
+  try {
+    const bounds = L.geoJSON(feature).getBounds();
+    if (bounds.isValid()) return { bounds };
+  } catch {}
+  return null;
+}
+
 async function fetchCountyBoundaries() {
   const fips = encodeURIComponent("('049','039','123')");
   const url =
@@ -187,24 +216,85 @@ function waterwayOnEachFeature(feature, layer) {
 export default function MapView() {
   const [county, setCounty] = useState('all');
   const [countyGeoJSON, setCountyGeoJSON] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showResults, setShowResults] = useState(false);
+  const [flyTarget, setFlyTarget] = useState(null);
+  const searchRef = useRef(null);
+
   const [layers, setLayers] = useState([
-    { id: 'publicLands',      label: 'Public Lands',              visible: true,  color: '#65a30d' },
-    { id: 'fishingEasements', label: 'PFBC Fishing Easements',    visible: true,  color: '#9333ea' },
-    { id: 'nhd',              label: 'USGS Hydrography',          visible: true,  color: '#3b82f6' },
-    { id: 'osmWaterways',     label: 'OSM Waterways',             visible: true,  color: '#60a5fa' },
-    { id: 'troutWaters',      label: 'Stocked Trout Waters',      visible: true,  color: '#f97316' },
-    { id: 'accessPoints',     label: 'PFBC Access Points',        visible: true,  color: '#1d4ed8' },
-    { id: 'countyBounds',     label: 'County Boundaries',         visible: true,  color: '#1e40af' },
+    { id: 'publicLands',      label: 'Public Lands',          visible: true,  color: '#65a30d' },
+    { id: 'fishingEasements', label: 'Fishing Easements',     visible: true,  color: '#9333ea' },
+    { id: 'nhd',              label: 'USGS Waterways',        visible: true,  color: '#3b82f6' },
+    { id: 'osmWaterways',     label: 'Streams & Rivers',      visible: true,  color: '#60a5fa' },
+    { id: 'troutWaters',      label: 'Stocked Trout Waters',  visible: true,  color: '#f97316' },
+    { id: 'accessPoints',     label: 'Boat Launches & Access',visible: true,  color: '#1d4ed8' },
+    { id: 'countyBounds',     label: 'County Boundaries',     visible: true,  color: '#1e40af' },
   ]);
 
-  const { data: waterwayData, isLoading: waterwaysLoading } = useOverpassWaterways(county);
-  const { data: accessData } = useAccessPoints(county);
-  const { data: troutData } = useTroutWaters(county);
-  const { data: publicLandsData } = usePublicLands(county);
-  const { data: easementsData } = useFishingEasements(county);
+  const { data: waterwayData,    isLoading: osmLoading,      isError: osmError      } = useOverpassWaterways(county);
+  const { data: accessData,      isLoading: accessLoading,   isError: accessError   } = useAccessPoints(county);
+  const { data: troutData,       isLoading: troutLoading,    isError: troutError    } = useTroutWaters(county);
+  const { data: publicLandsData, isLoading: landsLoading,    isError: landsError    } = usePublicLands(county);
+  const { data: easementsData,   isLoading: easementsLoading,isError: easementsError} = useFishingEasements(county);
+
+  const loadingIds = [
+    osmLoading       && 'osmWaterways',
+    accessLoading    && 'accessPoints',
+    troutLoading     && 'troutWaters',
+    landsLoading     && 'publicLands',
+    easementsLoading && 'fishingEasements',
+  ].filter(Boolean);
+
+  const errorIds = [
+    osmError       && 'osmWaterways',
+    accessError    && 'accessPoints',
+    troutError     && 'troutWaters',
+    landsError     && 'publicLands',
+    easementsError && 'fishingEasements',
+  ].filter(Boolean);
+
+  // Search across all loaded features
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const results = [];
+
+    waterwayData?.features?.forEach(f => {
+      const name = f.properties?.name;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name, type: 'Stream / River', feature: f, color: '#3b82f6' });
+    });
+
+    troutData?.features?.forEach(f => {
+      const name = f.properties?.WATER_NAME;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name, type: 'Stocked Trout Water', feature: f, color: '#f97316' });
+    });
+
+    accessData?.features?.forEach(f => {
+      const p = f.properties;
+      const name = p?.SITE_NAME || p?.name || p?.ACCESS_NAME;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name, type: 'Access Point', feature: f, color: '#1d4ed8' });
+    });
+
+    return results.slice(0, 8);
+  }, [searchQuery, waterwayData, troutData, accessData]);
 
   useEffect(() => {
     fetchCountyBoundaries().then(setCountyGeoJSON);
+  }, []);
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    function handleClick(e) {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setShowResults(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
   function toggleLayer(id) {
@@ -212,16 +302,75 @@ export default function MapView() {
   }
 
   const isVisible = (id) => layers.find((l) => l.id === id)?.visible;
-  const hl = county !== 'all'; // highlight mode when a specific county is selected
+  const hl = county !== 'all';
 
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center gap-3 flex-wrap flex-shrink-0">
-        <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">County:</span>
-        <CountyFilter selected={county} onChange={setCounty} />
-        {waterwaysLoading && (
-          <span className="text-xs text-blue-600 ml-auto animate-pulse">Loading waterways…</span>
+      <div className="bg-white border-b border-gray-200 px-3 py-2 flex flex-wrap items-center gap-2 flex-shrink-0">
+
+        {/* Search */}
+        <div ref={searchRef} className="relative flex-1 min-w-[180px] max-w-sm">
+          <div className="relative">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search streams, lakes, access points…"
+              value={searchQuery}
+              onChange={e => { setSearchQuery(e.target.value); setShowResults(true); }}
+              onFocus={() => setShowResults(true)}
+              className="w-full pl-8 pr-7 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(''); setShowResults(false); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs leading-none"
+                title="Clear search"
+              >✕</button>
+            )}
+          </div>
+
+          {/* Dropdown results */}
+          {showResults && searchQuery.length >= 2 && (
+            <div className="absolute top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-md shadow-lg z-[2000] max-h-60 overflow-y-auto">
+              {searchResults.length > 0 ? searchResults.map((r, i) => (
+                <button
+                  key={i}
+                  className="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center gap-2 border-b border-gray-100 last:border-0"
+                  onClick={() => {
+                    const target = getFeatureTarget(r.feature);
+                    if (target) setFlyTarget({ ...target, _id: Date.now() });
+                    setShowResults(false);
+                    setSearchQuery(r.name);
+                  }}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: r.color }} />
+                  <span className="text-sm text-gray-800 flex-1 truncate">{r.name}</span>
+                  <span className="text-xs text-gray-400 flex-shrink-0 ml-2">{r.type}</span>
+                </button>
+              )) : (
+                <div className="px-3 py-2 text-sm text-gray-500">No results — try a different name</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Divider */}
+        <div className="hidden sm:block h-5 w-px bg-gray-200 flex-shrink-0" />
+
+        {/* County filter */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-xs text-gray-500 font-medium whitespace-nowrap hidden sm:inline">Zoom to county:</span>
+          <CountyFilter selected={county} onChange={setCounty} />
+        </div>
+
+        {/* Loading indicator */}
+        {loadingIds.length > 0 && (
+          <span className="ml-auto text-xs text-blue-500 animate-pulse flex-shrink-0 whitespace-nowrap">
+            Loading…
+          </span>
         )}
       </div>
 
@@ -233,6 +382,7 @@ export default function MapView() {
           className="h-full w-full"
         >
           <FlyToCounty county={county} />
+          <FlyToTarget target={flyTarget} />
 
           {/* OSM base layer */}
           <TileLayer
@@ -351,7 +501,7 @@ export default function MapView() {
               const p = feature.properties;
               const name =
                 p?.SITE_NAME || p?.name || p?.Name || p?.ACCESS_NAME || 'Access Point';
-              const county = p?.COUNTY || p?.county || p?.County || '';
+              const countyName = p?.COUNTY || p?.county || p?.County || '';
               const type = p?.ACCESS_TYPE || p?.type || p?.Type || '';
               const waterBody = p?.WATERWAY || p?.waterBody || p?.WaterBody || '';
               const facilities = p?.facilities || p?.Facilities || '';
@@ -369,9 +519,9 @@ export default function MapView() {
                           <b>Water:</b> {waterBody}
                         </p>
                       )}
-                      {county && (
+                      {countyName && (
                         <p style={{ margin: '0 0 2px', color: '#6b7280', fontSize: '11px' }}>
-                          {county} County
+                          {countyName} County
                         </p>
                       )}
                       {type && (
@@ -404,62 +554,15 @@ export default function MapView() {
             })}
         </MapContainer>
 
-        {/* Layer Controls overlay */}
-        <div className="absolute bottom-10 right-2 z-[1000]">
-          <LayerControls layers={layers} onToggle={toggleLayer} />
-        </div>
-
-        {/* Legend */}
-        <div className="absolute bottom-10 left-2 z-[1000] bg-white rounded shadow p-2 text-xs space-y-1.5">
-          <p className="font-semibold text-gray-700 uppercase tracking-wide text-xs mb-1">
-            Legend
-          </p>
-          {/* Public Lands */}
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(163,230,53,0.5)', border: '1.5px solid #65a30d' }} />
-            <span className="text-gray-600">State Game Land</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(220,252,231,0.7)', border: '1.5px solid #166534' }} />
-            <span className="text-gray-600">State Forest</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(186,230,253,0.6)', border: '1.5px solid #0369a1' }} />
-            <span className="text-gray-600">State Park</span>
-          </div>
-          {/* Waterways */}
-          <div className="flex items-center gap-2">
-            <span className="inline-block" style={{ display: 'inline-block', width: 20, height: 0, borderTop: '2px solid #60a5fa' }} />
-            <span className="text-gray-600">Rivers / Streams (OSM)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(147,197,253,0.5)', border: '1.5px solid #3b82f6' }} />
-            <span className="text-gray-600">Lakes / Ponds</span>
-          </div>
-          {/* Trout */}
-          <div className="flex items-center gap-2">
-            <span className="inline-block" style={{ display: 'inline-block', width: 20, height: 0, borderTop: '2.5px dashed #f97316' }} />
-            <span className="text-gray-600">Stocked Trout Streams</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgba(254,215,170,0.6)', border: '1.5px solid #ea580c' }} />
-            <span className="text-gray-600">Stocked Trout Lakes</span>
-          </div>
-          {/* Easements */}
-          <div className="flex items-center gap-2">
-            <span className="inline-block" style={{ display: 'inline-block', width: 20, height: 0, borderTop: '3px dashed #9333ea' }} />
-            <span className="text-gray-600">PFBC Fishing Easement</span>
-          </div>
-          {/* Points */}
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-3 h-3 rounded-full border-2 border-white shadow" style={{ background: '#1d4ed8' }} />
-            <span className="text-gray-600">PFBC Access Point</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block" style={{ display: 'inline-block', width: 20, height: 0, borderTop: '2px dashed #1e40af' }} />
-            <span className="text-gray-600">County Boundary</span>
-          </div>
-        </div>
+        {/* Combined layers + legend sidebar */}
+        <MapSidebar
+          open={sidebarOpen}
+          onToggle={() => setSidebarOpen(v => !v)}
+          layers={layers}
+          onLayerToggle={toggleLayer}
+          loadingIds={loadingIds}
+          errorIds={errorIds}
+        />
       </div>
     </div>
   );
