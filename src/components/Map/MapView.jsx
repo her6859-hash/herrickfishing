@@ -21,6 +21,7 @@ import { useFishingEasements } from '../../hooks/useFishingEasements';
 import { countyBounds, defaultView } from '../../data/countyBounds';
 import { specialWaterways } from '../../data/regulations2026';
 import { stockingGeoJSON, SPECIES_COLORS } from '../../data/stockingSchedule';
+import { erieTribAccessGeoJSON, ACCESS_TYPE_META } from '../../data/erieTribAccess';
 
 // Fix Leaflet default icon path issues with Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -258,6 +259,7 @@ export default function MapView() {
     { id: 'warmwaterStreams', label: 'Warmwater / Coolwater Streams', visible: true, color: '#10b981' },
     { id: 'stockingReaches',  label: 'Stocking Reaches (2026)',     visible: true,  color: '#92400e' },
     { id: 'accessPoints',     label: 'Boat Launches & Access',      visible: true,  color: '#1d4ed8' },
+    { id: 'erieTribAccess',   label: 'Erie Trib Access (Maps 5–12)', visible: true, color: '#0891b2' },
     { id: 'countyBounds',     label: 'County Boundaries',     visible: true,  color: '#1e40af' },
   ]);
 
@@ -695,6 +697,36 @@ export default function MapView() {
               </>
             );
           })()}
+
+          {/* Erie Tributary Access Points — FishUSA Maps 5–12 */}
+          {isVisible('erieTribAccess') && erieTribAccessGeoJSON.features.map((feature, i) => {
+            const [lng, lat] = feature.geometry.coordinates;
+            const p = feature.properties;
+            const meta = ACCESS_TYPE_META[p.type] || { color: '#0891b2', label: p.type };
+            const tribIcon = L.divIcon({
+              className: '',
+              html: `<div style="background:${meta.color};border:2px solid white;border-radius:50%;width:11px;height:11px;box-shadow:0 1px 4px rgba(0,0,0,0.55)"></div>`,
+              iconSize: [11, 11],
+              iconAnchor: [5, 5],
+              popupAnchor: [0, -9],
+            });
+            return (
+              <Marker key={`trib-${i}`} position={[lat, lng]} icon={tribIcon}>
+                <Popup maxWidth={310}>
+                  <div style={{ fontFamily: 'system-ui,sans-serif', fontSize: '13px', maxWidth: 290 }}>
+                    <h3 style={{ fontWeight: 700, color: '#164e63', margin: '0 0 5px', fontSize: '13px' }}>{p.name}</h3>
+                    <span style={{ background: `${meta.color}22`, color: meta.color, fontSize: '10px', padding: '2px 8px', borderRadius: 999, border: `1px solid ${meta.color}55` }}>{meta.label}</span>
+                    {p.creek && <p style={{ margin: '5px 0 2px', fontSize: '11px', color: '#374151' }}><b>Creek:</b> {p.creek}</p>}
+                    {p.area && <p style={{ margin: '2px 0 4px', fontSize: '11px', color: '#6b7280' }}>{p.area}</p>}
+                    {p.description && <p style={{ margin: '5px 0 3px', fontSize: '11px', color: '#374151' }}>{p.description}</p>}
+                    {p.targetSpecies && <p style={{ margin: '3px 0', fontSize: '11px', color: '#374151' }}><b>Target species:</b> {p.targetSpecies}</p>}
+                    {p.permitRequired && <p style={{ margin: '4px 0', fontSize: '11px', color: '#b45309', fontWeight: 600 }}>&#9888; {p.permitRequired}</p>}
+                    {p.notes && <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#6b7280', fontStyle: 'italic' }}>{p.notes}</p>}
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
 
           {/* PFBC Access Points */}
           {isVisible('accessPoints') &&
