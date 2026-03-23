@@ -60,7 +60,7 @@ export default function FishingSpotsList({
 
       {/* Panel */}
       {open && (
-        <div className="mt-1 bg-white rounded-lg shadow-lg border border-gray-200 w-64 max-h-[75vh] flex flex-col">
+        <div className="mt-1 bg-white rounded-lg shadow-lg border border-gray-200 w-52 sm:w-64 max-h-[65vh] sm:max-h-[75vh] flex flex-col">
 
           {/* Tabs */}
           <div className="flex border-b border-gray-200 flex-shrink-0">

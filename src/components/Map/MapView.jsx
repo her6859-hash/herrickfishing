@@ -23,6 +23,7 @@ import { specialWaterways } from '../../data/regulations2026';
 import { stockingGeoJSON, SPECIES_COLORS } from '../../data/stockingSchedule';
 import { erieTribAccessGeoJSON, ACCESS_TYPE_META } from '../../data/erieTribAccess';
 import { classAWildTroutGeoJSON, CLASS_A_FISHERY_COLORS } from '../../data/classAWildTrout';
+import { localShopsGeoJSON } from '../../data/localShops';
 
 // Fix Leaflet default icon path issues with Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -263,6 +264,7 @@ export default function MapView() {
     { id: 'erieTribAccess',   label: 'Erie Trib Access (Maps 5–12)', visible: true, color: '#0891b2' },
     { id: 'classAWildTrout',  label: 'Class A Wild Trout Streams', visible: true,  color: '#0d9488' },
     { id: 'countyBounds',     label: 'County Boundaries',     visible: true,  color: '#1e40af' },
+    { id: 'localShops',       label: 'Fly Shops & Tackle',    visible: true,  color: '#be185d' },
   ]);
 
   const { data: waterwayData,    isLoading: osmLoading,      isError: osmError      } = useOverpassWaterways(county);
@@ -395,10 +397,10 @@ export default function MapView() {
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="bg-white border-b border-gray-200 px-3 py-2 flex flex-wrap items-center gap-2 flex-shrink-0">
+      <div className="bg-white border-b border-gray-200 px-2 py-1.5 sm:px-3 sm:py-2 flex flex-wrap items-center gap-2 flex-shrink-0">
 
         {/* Search */}
-        <div ref={searchRef} className="relative flex-1 min-w-[180px] max-w-sm">
+        <div ref={searchRef} className="relative flex-1 min-w-[140px] sm:min-w-[180px] max-w-sm">
           <div className="relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -409,7 +411,7 @@ export default function MapView() {
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setShowResults(true); }}
               onFocus={() => setShowResults(true)}
-              className="w-full pl-8 pr-7 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+              className="w-full pl-8 pr-7 py-2 sm:py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
             />
             {searchQuery && (
               <button
@@ -781,6 +783,37 @@ export default function MapView() {
                     {p.targetSpecies && <p style={{ margin: '3px 0', fontSize: '11px', color: '#374151' }}><b>Target species:</b> {p.targetSpecies}</p>}
                     {p.permitRequired && <p style={{ margin: '4px 0', fontSize: '11px', color: '#b45309', fontWeight: 600 }}>&#9888; {p.permitRequired}</p>}
                     {p.notes && <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#6b7280', fontStyle: 'italic' }}>{p.notes}</p>}
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+
+          {/* Local Fly Shops & Tackle Shops */}
+          {isVisible('localShops') && localShopsGeoJSON.features.map((feature, i) => {
+            const [lng, lat] = feature.geometry.coordinates;
+            const p = feature.properties;
+            const shopIcon = L.divIcon({
+              className: '',
+              html: `<div style="display:flex;align-items:center;justify-content:center;background:#be185d;border:2px solid white;border-radius:4px;width:22px;height:22px;box-shadow:0 1px 4px rgba(0,0,0,0.55);font-size:13px;line-height:1">${p.icon}</div>`,
+              iconSize: [22, 22],
+              iconAnchor: [11, 11],
+              popupAnchor: [0, -13],
+            });
+            return (
+              <Marker key={`shop-${i}`} position={[lat, lng]} icon={shopIcon}>
+                <Popup maxWidth={310}>
+                  <div style={{ fontFamily: 'system-ui,sans-serif', fontSize: '13px', maxWidth: 290 }}>
+                    <h3 style={{ fontWeight: 700, color: '#831843', margin: '0 0 4px', fontSize: '13px' }}>{p.name}</h3>
+                    <span style={{ background: '#fce7f3', color: '#be185d', fontSize: '10px', padding: '2px 8px', borderRadius: 999, border: '1px solid #fbcfe8' }}>{p.type}</span>
+                    <p style={{ margin: '6px 0 2px', fontSize: '11px', color: '#374151' }}>{p.description}</p>
+                    <p style={{ margin: '4px 0 2px', fontSize: '11px', color: '#374151' }}><b>Species:</b> {p.species}</p>
+                    <p style={{ margin: '2px 0 2px', fontSize: '11px', color: '#6b7280' }}>{p.address}</p>
+                    <p style={{ margin: '2px 0 4px', fontSize: '11px', color: '#6b7280' }}>{p.phone}</p>
+                    <a href={p.website} target="_blank" rel="noopener noreferrer"
+                       style={{ display: 'inline-block', fontSize: '11px', color: '#be185d', fontWeight: 600, textDecoration: 'none' }}>
+                      Visit Website &#8599;
+                    </a>
                   </div>
                 </Popup>
               </Marker>

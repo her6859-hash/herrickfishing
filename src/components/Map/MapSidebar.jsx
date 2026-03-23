@@ -13,6 +13,7 @@ const LEGEND_ITEMS = [
   { swatch: { type: 'dash', color: '#9333ea' },                                label: 'Fishing Easement' },
   { swatch: { type: 'dot',  color: '#1d4ed8' },                                label: 'Boat Launch / Access' },
   { swatch: { type: 'dash', color: '#1e40af' },                                label: 'County Boundary' },
+  { swatch: { type: 'dot',  color: '#be185d' },                                label: 'Fly Shop / Tackle' },
 ];
 
 function Swatch({ s }) {
@@ -70,7 +71,7 @@ export default function MapSidebar({ open, onToggle, layers, onLayerToggle, load
 
       {/* Panel */}
       {open && (
-        <div className="mt-1 bg-white rounded-lg shadow-lg border border-gray-200 w-52 max-h-[75vh] overflow-y-auto">
+        <div className="mt-1 bg-white rounded-lg shadow-lg border border-gray-200 w-44 sm:w-52 max-h-[65vh] sm:max-h-[75vh] overflow-y-auto">
 
           {/* Layer Toggles */}
           <div className="p-3">
