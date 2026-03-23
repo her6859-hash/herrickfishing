@@ -16,6 +16,7 @@ export const ACCESS_TYPE_META = {
   'Park/Shore Access':    { color: '#0d9488', label: 'Park / Shore Access'  },
   'Roadside Parking':     { color: '#6b7280', label: 'Roadside Parking'     },
   'Walk-in Access':       { color: '#92400e', label: 'Walk-in Access'        },
+  'Waterfall':            { color: '#0ea5e9', label: 'Waterfall / Landmark'  },
 };
 
 // Named access points compiled from FishUSA Maps 5–12
@@ -357,6 +358,17 @@ const RAW_POINTS = [
     targetSpecies: 'Steelhead (rainbow trout)',
     permitRequired: 'Lake Erie Permit',
     notes: "PFBC fishing easement — public fishing legal. 'Buttermilk Falls' drops ~50 ft on south bank. Fish upstream from parking to the falls (~¼ mile). Less crowded than lower sections.",
+  },
+  {
+    name: 'Buttermilk Falls — Walnut Creek',
+    lat: 42.051514416020865, lng: -80.17063432883627,
+    type: 'Waterfall',
+    area: 'Millcreek Township',
+    creek: 'Walnut Creek',
+    description: 'Buttermilk Falls on Walnut Creek — a ~50 ft waterfall on the south bank. Steelhead stack in the plunge pool and run of water below the falls. Natural upstream barrier during low flow; fish move above in high water.',
+    targetSpecies: 'Steelhead (rainbow trout)',
+    permitRequired: 'Lake Erie Permit',
+    notes: 'Fish the pool directly below the falls and the 100–200 m of run downstream. Egg patterns, sucker spawn, and streamers on the swing are effective. Access via Asbury Woods easement from Brown\'s Farm parking on Rt 832 (~¼ mile walk upstream).',
   },
   {
     name: 'Old Sterrettania Road Bridge Access (Walnut Creek)',

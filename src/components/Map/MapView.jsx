@@ -759,12 +759,15 @@ export default function MapView() {
             const [lng, lat] = feature.geometry.coordinates;
             const p = feature.properties;
             const meta = ACCESS_TYPE_META[p.type] || { color: '#0891b2', label: p.type };
+            const isWaterfall = p.type === 'Waterfall';
             const tribIcon = L.divIcon({
               className: '',
-              html: `<div style="background:${meta.color};border:2px solid white;border-radius:50%;width:11px;height:11px;box-shadow:0 1px 4px rgba(0,0,0,0.55)"></div>`,
-              iconSize: [11, 11],
-              iconAnchor: [5, 5],
-              popupAnchor: [0, -9],
+              html: isWaterfall
+                ? `<div style="display:flex;align-items:center;justify-content:center;background:${meta.color};border:2px solid white;border-radius:3px;width:20px;height:20px;box-shadow:0 1px 4px rgba(0,0,0,0.6);font-size:13px;line-height:1">💧</div>`
+                : `<div style="background:${meta.color};border:2px solid white;border-radius:50%;width:11px;height:11px;box-shadow:0 1px 4px rgba(0,0,0,0.55)"></div>`,
+              iconSize:   isWaterfall ? [20, 20] : [11, 11],
+              iconAnchor: isWaterfall ? [10, 10] : [5, 5],
+              popupAnchor: [0, isWaterfall ? -12 : -9],
             });
             return (
               <Marker key={`trib-${i}`} position={[lat, lng]} icon={tribIcon}>
