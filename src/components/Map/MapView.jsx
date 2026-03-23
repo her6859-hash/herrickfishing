@@ -20,6 +20,7 @@ import { usePublicLands } from '../../hooks/usePublicLands';
 import { useFishingEasements } from '../../hooks/useFishingEasements';
 import { countyBounds, defaultView } from '../../data/countyBounds';
 import { specialWaterways } from '../../data/regulations2026';
+import { stockingGeoJSON, SPECIES_COLORS } from '../../data/stockingSchedule';
 
 // Fix Leaflet default icon path issues with Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -37,6 +38,18 @@ const accessIcon = L.divIcon({
   iconAnchor: [6, 6],
   popupAnchor: [0, -10],
 });
+
+// Stocking reach marker — fish icon pill, color by primary species
+function makeStockingIcon(primarySpecies) {
+  const color = SPECIES_COLORS[primarySpecies] || '#92400e';
+  return L.divIcon({
+    className: '',
+    html: `<div style="background:${color};border:2px solid white;border-radius:4px;width:14px;height:10px;box-shadow:0 1px 3px rgba(0,0,0,0.5)"></div>`,
+    iconSize: [14, 10],
+    iconAnchor: [7, 5],
+    popupAnchor: [0, -10],
+  });
+}
 
 // Public land styles — each type uses a distinct color family
 function makePublicLandStyles(hl) {
@@ -243,7 +256,8 @@ export default function MapView() {
     { id: 'osmWaterways',     label: 'Streams & Rivers',      visible: true,  color: '#60a5fa' },
     { id: 'troutWaters',      label: 'Stocked Trout Waters',  visible: true,  color: '#f97316' },
     { id: 'warmwaterStreams', label: 'Warmwater / Coolwater Streams', visible: true, color: '#10b981' },
-    { id: 'accessPoints',     label: 'Boat Launches & Access',visible: true,  color: '#1d4ed8' },
+    { id: 'stockingReaches',  label: 'Stocking Reaches (2026)',     visible: true,  color: '#92400e' },
+    { id: 'accessPoints',     label: 'Boat Launches & Access',      visible: true,  color: '#1d4ed8' },
     { id: 'countyBounds',     label: 'County Boundaries',     visible: true,  color: '#1e40af' },
   ]);
 
@@ -294,6 +308,12 @@ export default function MapView() {
       const name = f.properties?.WATER_NAME;
       if (name && name.toLowerCase().includes(q))
         results.push({ name, type: 'Warmwater Stream', feature: f, color: '#10b981' });
+    });
+
+    stockingGeoJSON.features.forEach(f => {
+      const name = f.properties?.name;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name: `${name} §${f.properties.section}`, type: 'Stocking Reach', feature: f, color: '#92400e' });
     });
 
     accessData?.features?.forEach(f => {
@@ -597,6 +617,84 @@ export default function MapView() {
               }}
             />
           )}
+
+          {/* PFBC Stocking Reaches (2026) — lines + midpoint markers */}
+          {isVisible('stockingReaches') && (() => {
+            const features = stockingGeoJSON.features;
+            if (!features.length) return null;
+
+            // Build popup HTML for a stocking reach
+            function stockingPopupHTML(p) {
+              const speciesColors = { Brown: '#92400e', Rainbow: '#0369a1', Golden: '#ca8a04', Steelhead: '#7e22ce' };
+              const speciesTags = p.allSpecies.map(s =>
+                `<span style="background:${speciesColors[s] || '#374151'}22;color:${speciesColors[s] || '#374151'};font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid ${speciesColors[s] || '#374151'}44">${s} Trout</span>`
+              ).join(' ');
+              const eventRows = p.stockingEvents.map(ev => {
+                const d = new Date(ev.date + 'T12:00:00');
+                const fmt = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                return `<tr><td style="padding:2px 6px 2px 0;color:#374151">${fmt}</td><td style="padding:2px 0;color:#6b7280">${ev.species.join(', ')}</td></tr>`;
+              }).join('');
+              const reachLabel = p.isPoint ? p.name : `${p.name} — Section ${p.section}`;
+              const limitsHTML = p.isPoint ? '' : `
+                <p style="font-size:10px;color:#6b7280;margin:4px 0 1px"><b>Upper:</b> ${p.upperDesc}</p>
+                <p style="font-size:10px;color:#6b7280;margin:0 0 4px"><b>Lower:</b> ${p.lowerDesc}</p>`;
+              return `
+                <div style="min-width:210px;max-width:300px;font-family:system-ui,sans-serif">
+                  <h3 style="font-weight:700;color:#78350f;font-size:13px;margin:0 0 4px">${reachLabel}</h3>
+                  <div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px">${speciesTags}</div>
+                  ${limitsHTML}
+                  <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:4px">
+                    <thead><tr style="border-bottom:1px solid #e5e7eb">
+                      <th style="text-align:left;padding:2px 6px 2px 0;color:#9ca3af;font-weight:600">Stocking Date</th>
+                      <th style="text-align:left;padding:2px 0;color:#9ca3af;font-weight:600">Species</th>
+                    </tr></thead>
+                    <tbody>${eventRows}</tbody>
+                  </table>
+                  <p style="font-size:10px;color:#6b7280;margin:2px 0"><b>Regulation:</b> ${p.regulation}</p>
+                  <p style="font-size:10px;color:#6b7280;margin:2px 0"><b>Meeting place:</b> ${p.meetingPlace}</p>
+                  <p style="font-size:10px;color:#6b7280;margin:2px 0"><b>Hatchery:</b> ${p.hatchery}</p>
+                  <a href="https://www.pa.gov/agencies/fishandboat/fishing/trout-stocking" target="_blank" rel="noopener noreferrer"
+                     style="display:inline-block;margin-top:5px;font-size:11px;color:#92400e;font-weight:600;text-decoration:none">
+                    PFBC Stocking Info &#8599;
+                  </a>
+                </div>`;
+            }
+
+            return (
+              <>
+                {/* Line segments for stream reaches */}
+                <GeoJSON
+                  key="stocking-lines"
+                  data={{ type: 'FeatureCollection', features: features.filter(f => f.geometry.type === 'LineString') }}
+                  style={(feature) => {
+                    const color = SPECIES_COLORS[feature.properties.primarySpecies] || '#92400e';
+                    return { color, weight: hl ? 5 : 3, opacity: 0.9, dashArray: '10 5' };
+                  }}
+                  onEachFeature={(feature, layer) => {
+                    layer.bindTooltip(`${feature.properties.name} §${feature.properties.section} — Stocked ${feature.properties.allSpecies.join('/')} Trout`, { direction: 'top', className: 'text-xs' });
+                    layer.on('click', e => {
+                      L.popup({ maxWidth: 340 }).setLatLng(e.latlng).setContent(stockingPopupHTML(feature.properties)).openOn(e.target._map);
+                    });
+                  }}
+                />
+                {/* Midpoint markers for reaches + point markers for ponds */}
+                {features.map((feature, i) => {
+                  const p = feature.properties;
+                  return (
+                    <Marker
+                      key={`stocking-marker-${i}`}
+                      position={[p.midLat, p.midLng]}
+                      icon={makeStockingIcon(p.primarySpecies)}
+                    >
+                      <Popup maxWidth={340}>
+                        <div dangerouslySetInnerHTML={{ __html: stockingPopupHTML(p) }} />
+                      </Popup>
+                    </Marker>
+                  );
+                })}
+              </>
+            );
+          })()}
 
           {/* PFBC Access Points */}
           {isVisible('accessPoints') &&
