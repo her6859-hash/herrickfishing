@@ -5,6 +5,7 @@ import SpecialWaters from './SpecialWaters';
 import LicenseInfo from './LicenseInfo';
 import RegulatedWatersNW from './RegulatedWatersNW';
 import ClassAWildTrout from './ClassAWildTrout';
+import SteelheadGuide from './SteelheadGuide';
 
 function Section({ title, defaultOpen, badge, children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -108,6 +109,15 @@ export default function RegulationsPanel() {
           Waterways marked ⚠️ require an additional permit beyond the base fishing license.
         </p>
         <SpecialWaters />
+      </Section>
+
+      {/* Steelhead Run Guide */}
+      <Section
+        title="Erie Steelhead Run Guide"
+        defaultOpen={false}
+        badge="Oct–Apr · Peak: Nov"
+      >
+        <SteelheadGuide />
       </Section>
 
       {/* Class A Wild Trout Waters */}
