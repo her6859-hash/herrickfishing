@@ -3,6 +3,9 @@ import { generalInfo } from '../../data/regulations2026';
 import SpeciesTable from './SpeciesTable';
 import SpecialWaters from './SpecialWaters';
 import LicenseInfo from './LicenseInfo';
+import RegulatedWatersNW from './RegulatedWatersNW';
+import ClassAWildTrout from './ClassAWildTrout';
+import SteelheadGuide from './SteelheadGuide';
 
 function Section({ title, defaultOpen, badge, children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -106,6 +109,44 @@ export default function RegulationsPanel() {
           Waterways marked ⚠️ require an additional permit beyond the base fishing license.
         </p>
         <SpecialWaters />
+      </Section>
+
+      {/* Steelhead Run Guide */}
+      <Section
+        title="Erie Steelhead Run Guide"
+        defaultOpen={false}
+        badge="Oct–Apr · Peak: Nov"
+      >
+        <SteelheadGuide />
+      </Section>
+
+      {/* Class A Wild Trout Waters */}
+      <Section
+        title="Class A Wild Trout Streams — NW Region"
+        defaultOpen={false}
+        badge="28 streams · 7 counties"
+      >
+        <p className="text-xs text-gray-500 mb-3">
+          PFBC-certified streams with naturally reproducing wild trout populations.
+          These are <strong>not stocked</strong> — wild fish only. Filtered to Erie,
+          Crawford, Warren, Forest, Venango, and Lawrence counties.
+          Triangle markers on the map indicate Class A stream locations.
+        </p>
+        <ClassAWildTrout />
+      </Section>
+
+      {/* NW Region Regulated Trout Waters */}
+      <Section
+        title="NW Region Regulated Trout Waters"
+        defaultOpen={false}
+        badge="9 counties · 130+ waters"
+      >
+        <p className="text-xs text-gray-500 mb-3">
+          Official PFBC-designated stocked trout sections, special regulation waters, and year-round
+          fishing zones for the Northwest Region (Butler, Clarion, Crawford, Erie, Forest, Lawrence,
+          Mercer, Venango, Warren counties). Filter by county or regulation type.
+        </p>
+        <RegulatedWatersNW />
       </Section>
 
       {/* General Rules */}

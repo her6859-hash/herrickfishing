@@ -212,8 +212,22 @@ export const specialWaterways = [
       trout: '7" min, stocked sections Apr 4',
     },
     notes:
-      'Lake Erie tributary. Steelhead and stocked trout. Lake Erie Permit required. PFBC access area at mouth.',
+      'Lake Erie tributary. PFBC has public fishing easements both below AND south of Manchester Road (US Rte 20) in Millcreek Township. PFBC access area with 6 boat ramps at the mouth. Lake Erie Permit required throughout.',
     pfbcLink: 'https://www.pa.gov/agencies/fishandboat/fishing/regulations',
+    permitRequired: 'Lake Erie Permit ($9.97)',
+  },
+  {
+    name: 'Twenty Mile Creek',
+    county: 'Erie',
+    type: 'stream',
+    rules: {
+      steelhead: 'Rainbow trout regs — 7" min, 5/day (regular), 3/day (extended)',
+      bass: '12" min, 6/day',
+    },
+    notes:
+      "PFBC's largest public fishing easement acquisition in Erie County — nearly 9,000 linear feet in North East Township. Parking at North East Township Community Conservation Park. Lake Erie Permit required.",
+    pfbcLink:
+      'https://www.pa.gov/agencies/fishandboat/newsroom/pfbc-announces-significant-addition-of-public-fishing-access-on-twentymile-creek-in-erie-county',
     permitRequired: 'Lake Erie Permit ($9.97)',
   },
   {

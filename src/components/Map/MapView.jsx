@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -10,12 +10,20 @@ import {
 } from 'react-leaflet';
 import L from 'leaflet';
 import CountyFilter from './CountyFilter';
-import LayerControls from './LayerControls';
+import MapSidebar from './MapSidebar';
+import FishingSpotsList from './FishingSpotsList';
 import { useOverpassWaterways } from '../../hooks/useOverpassWaterways';
 import { useAccessPoints } from '../../hooks/useAccessPoints';
 import { useTroutWaters } from '../../hooks/useTroutWaters';
+import { useWarmwaterStreams, getWarmwaterSpecies } from '../../hooks/useWarmwaterStreams';
+import { usePublicLands } from '../../hooks/usePublicLands';
+import { useFishingEasements } from '../../hooks/useFishingEasements';
 import { countyBounds, defaultView } from '../../data/countyBounds';
 import { specialWaterways } from '../../data/regulations2026';
+import { stockingGeoJSON, SPECIES_COLORS } from '../../data/stockingSchedule';
+import { erieTribAccessGeoJSON, ACCESS_TYPE_META } from '../../data/erieTribAccess';
+import { classAWildTroutGeoJSON, CLASS_A_FISHERY_COLORS } from '../../data/classAWildTrout';
+import { localShopsGeoJSON } from '../../data/localShops';
 
 // Fix Leaflet default icon path issues with Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -34,21 +42,85 @@ const accessIcon = L.divIcon({
   popupAnchor: [0, -10],
 });
 
-// GeoJSON styles
-const waterwayLineStyle = { color: '#3b82f6', weight: 1.5, opacity: 0.7 };
-const waterwayPolyStyle = { color: '#1d4ed8', weight: 1, fillColor: '#60a5fa', fillOpacity: 0.4 };
-const troutStreamStyle = { color: '#0d9488', weight: 2.5, opacity: 0.85, dashArray: '8 4' };
-const troutLakeStyle = { color: '#0d9488', weight: 2, fillColor: '#5eead4', fillOpacity: 0.35 };
-const countyStyle = { color: '#1e40af', weight: 2.5, fillOpacity: 0, dashArray: '8 5' };
-
-function getWaterwayStyle(feature) {
-  const t = feature.geometry?.type;
-  return t === 'Polygon' || t === 'MultiPolygon' ? waterwayPolyStyle : waterwayLineStyle;
+// Stocking reach marker — fish icon pill, color by primary species
+function makeStockingIcon(primarySpecies) {
+  const color = SPECIES_COLORS[primarySpecies] || '#92400e';
+  return L.divIcon({
+    className: '',
+    html: `<div style="background:${color};border:2px solid white;border-radius:4px;width:14px;height:10px;box-shadow:0 1px 3px rgba(0,0,0,0.5)"></div>`,
+    iconSize: [14, 10],
+    iconAnchor: [7, 5],
+    popupAnchor: [0, -10],
+  });
 }
 
-function getTroutStyle(feature) {
-  const t = feature.geometry?.type;
-  return t === 'Polygon' || t === 'MultiPolygon' ? troutLakeStyle : troutStreamStyle;
+// Public land styles — each type uses a distinct color family
+function makePublicLandStyles(hl) {
+  return {
+    'State Game Land': { color: '#65a30d', weight: hl ? 2 : 1, fillColor: '#a3e635', fillOpacity: hl ? 0.65 : 0.40 },
+    'State Forest':    { color: '#166534', weight: hl ? 2 : 1, fillColor: '#dcfce7', fillOpacity: hl ? 0.75 : 0.50 },
+    'State Park':      { color: '#0369a1', weight: hl ? 2 : 1, fillColor: '#bae6fd', fillOpacity: hl ? 0.70 : 0.45 },
+  };
+}
+
+function makeGetPublicLandStyle(hl) {
+  const styles = makePublicLandStyles(hl);
+  return (feature) => styles[feature.properties?._landType] || styles['State Game Land'];
+}
+
+function publicLandOnEachFeature(feature, layer) {
+  const p = feature.properties;
+  const label = p?._label || p?._landType || 'Public Land';
+  const type = p?._landType || '';
+  const acres = p?.ACREAGE || p?.ACRES || '';
+  layer.bindPopup(`
+    <div style="font-family:system-ui,sans-serif;min-width:160px">
+      <h3 style="font-weight:700;color:#14532d;font-size:13px;margin:0 0 4px">${label}</h3>
+      <span style="background:#dcfce7;color:#166534;font-size:11px;padding:2px 8px;border-radius:999px">${type}</span>
+      ${acres ? `<p style="font-size:11px;color:#6b7280;margin:4px 0 0">~${Math.round(acres).toLocaleString()} acres</p>` : ''}
+      <p style="font-size:11px;color:#15803d;font-weight:600;margin:6px 0 0">Public land — fishing allowed</p>
+    </div>
+  `);
+}
+
+// GeoJSON styles — normal (all counties) vs highlighted (single county selected)
+function makeStyles(hl) {
+  return {
+    waterwayLine: { color: '#3b82f6', weight: hl ? 3   : 1.5, opacity: hl ? 1   : 0.7 },
+    waterwayPoly: { color: '#1d4ed8', weight: hl ? 2   : 1,   fillColor: '#60a5fa', fillOpacity: hl ? 0.65 : 0.4 },
+    troutStream:  { color: '#f97316', weight: hl ? 4   : 2.5, opacity: hl ? 1   : 0.9, dashArray: '8 4' },
+    troutLake:    { color: '#ea580c', weight: hl ? 3   : 2,   fillColor: '#fed7aa', fillOpacity: hl ? 0.7  : 0.45 },
+    warmwater:    { color: '#10b981', weight: hl ? 4   : 2.5, opacity: hl ? 1   : 0.85, dashArray: '6 3' },
+    easement:     { color: '#9333ea', weight: hl ? 5   : 3,   opacity: hl ? 1   : 0.88, dashArray: '5 3' },
+  };
+}
+
+const countyStyle = { color: '#1e40af', weight: 2.5, fillOpacity: 0, dashArray: '8 5' };
+
+function makeGetWaterwayStyle(hl) {
+  const s = makeStyles(hl);
+  return (feature) => {
+    const t = feature.geometry?.type;
+    return t === 'Polygon' || t === 'MultiPolygon' ? s.waterwayPoly : s.waterwayLine;
+  };
+}
+
+function makeGetTroutStyle(hl) {
+  const s = makeStyles(hl);
+  return (feature) => {
+    const t = feature.geometry?.type;
+    return t === 'Polygon' || t === 'MultiPolygon' ? s.troutLake : s.troutStream;
+  };
+}
+
+function makeGetEasementStyle(hl) {
+  const s = makeStyles(hl);
+  return () => s.easement;
+}
+
+function makeGetWarmwaterStyle(hl) {
+  const s = makeStyles(hl);
+  return () => s.warmwater;
 }
 
 // Fly to county when selection changes
@@ -61,6 +133,35 @@ function FlyToCounty({ county }) {
       map.flyToBounds(countyBounds[county].bounds, { duration: 1, padding: [30, 30] });
     }
   }, [county, map]);
+  return null;
+}
+
+// Fly to a search result
+function FlyToTarget({ target }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!target) return;
+    if (target.bounds) {
+      map.fitBounds(target.bounds, { padding: [40, 40], maxZoom: 15, duration: 1 });
+    } else if (target.latlng) {
+      map.flyTo(target.latlng, target.zoom || 14, { duration: 1 });
+    }
+  }, [target, map]);
+  return null;
+}
+
+// Compute bounds/center from a GeoJSON feature for search fly-to
+function getFeatureTarget(feature) {
+  const geom = feature.geometry;
+  if (!geom) return null;
+  if (geom.type === 'Point') {
+    const [lng, lat] = geom.coordinates;
+    return { latlng: [lat, lng], zoom: 14 };
+  }
+  try {
+    const bounds = L.geoJSON(feature).getBounds();
+    if (bounds.isValid()) return { bounds };
+  } catch {}
   return null;
 }
 
@@ -136,23 +237,114 @@ function waterwayOnEachFeature(feature, layer) {
   }
 }
 
+// Highlight styles for stocked waters when selected
+const TROUT_HIGHLIGHT_LINE = { color: '#facc15', weight: 8, opacity: 1, dashArray: null };
+const TROUT_HIGHLIGHT_POLY = { color: '#facc15', weight: 6, fillColor: '#fef08a', fillOpacity: 0.85 };
+
 export default function MapView() {
   const [county, setCounty] = useState('all');
   const [countyGeoJSON, setCountyGeoJSON] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showResults, setShowResults] = useState(false);
+  const [flyTarget, setFlyTarget] = useState(null);
+  const searchRef = useRef(null);
+  // Ref tracking the currently highlighted stocked-water Leaflet layer
+  const selectedTroutLayerRef = useRef(null);
+
   const [layers, setLayers] = useState([
-    { id: 'nhd', label: 'USGS Hydrography', visible: true, color: '#3b82f6' },
-    { id: 'osmWaterways', label: 'OSM Waterways', visible: true, color: '#60a5fa' },
-    { id: 'troutWaters', label: 'Stocked Trout Waters', visible: true, color: '#0d9488' },
-    { id: 'accessPoints', label: 'PFBC Access Points', visible: true, color: '#1d4ed8' },
-    { id: 'countyBounds', label: 'County Boundaries', visible: true, color: '#1e40af' },
+    { id: 'publicLands',      label: 'Public Lands',          visible: true,  color: '#65a30d' },
+    { id: 'fishingEasements', label: 'Fishing Easements',     visible: true,  color: '#9333ea' },
+    { id: 'nhd',              label: 'USGS Waterways',        visible: true,  color: '#3b82f6' },
+    { id: 'osmWaterways',     label: 'Streams & Rivers',      visible: true,  color: '#60a5fa' },
+    { id: 'troutWaters',      label: 'Stocked Trout Waters',  visible: true,  color: '#f97316' },
+    { id: 'warmwaterStreams', label: 'Warmwater / Coolwater Streams', visible: true, color: '#10b981' },
+    { id: 'stockingReaches',  label: 'Stocking Reaches (2026)',     visible: true,  color: '#92400e' },
+    { id: 'accessPoints',     label: 'Boat Launches & Access',      visible: true,  color: '#1d4ed8' },
+    { id: 'erieTribAccess',   label: 'Erie Trib Access (Maps 5–12)', visible: true, color: '#0891b2' },
+    { id: 'classAWildTrout',  label: 'Class A Wild Trout Streams', visible: true,  color: '#0d9488' },
+    { id: 'countyBounds',     label: 'County Boundaries',     visible: true,  color: '#1e40af' },
+    { id: 'localShops',       label: 'Fly Shops & Tackle',    visible: true,  color: '#be185d' },
   ]);
 
-  const { data: waterwayData, isLoading: waterwaysLoading } = useOverpassWaterways(county);
-  const { data: accessData } = useAccessPoints(county);
-  const { data: troutData } = useTroutWaters(county);
+  const { data: waterwayData,    isLoading: osmLoading,      isError: osmError      } = useOverpassWaterways(county);
+  const { data: accessData,      isLoading: accessLoading,   isError: accessError   } = useAccessPoints(county);
+  const { data: troutData,       isLoading: troutLoading,    isError: troutError    } = useTroutWaters(county);
+  const { data: warmwaterData,   isLoading: warmwaterLoading,isError: warmwaterError} = useWarmwaterStreams(county);
+  const { data: publicLandsData, isLoading: landsLoading,    isError: landsError    } = usePublicLands(county);
+  const { data: easementsData,   isLoading: easementsLoading,isError: easementsError} = useFishingEasements(county);
+
+  const loadingIds = [
+    osmLoading        && 'osmWaterways',
+    accessLoading     && 'accessPoints',
+    troutLoading      && 'troutWaters',
+    warmwaterLoading  && 'warmwaterStreams',
+    landsLoading      && 'publicLands',
+    easementsLoading  && 'fishingEasements',
+  ].filter(Boolean);
+
+  const errorIds = [
+    osmError        && 'osmWaterways',
+    accessError     && 'accessPoints',
+    troutError      && 'troutWaters',
+    warmwaterError  && 'warmwaterStreams',
+    landsError      && 'publicLands',
+    easementsError  && 'fishingEasements',
+  ].filter(Boolean);
+
+  // Search across all loaded features
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const results = [];
+
+    waterwayData?.features?.forEach(f => {
+      const name = f.properties?.name;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name, type: 'Stream / River', feature: f, color: '#3b82f6' });
+    });
+
+    troutData?.features?.forEach(f => {
+      const name = f.properties?.WATER_NAME;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name, type: 'Stocked Trout Water', feature: f, color: '#f97316' });
+    });
+
+    warmwaterData?.features?.forEach(f => {
+      const name = f.properties?.WATER_NAME;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name, type: 'Warmwater Stream', feature: f, color: '#10b981' });
+    });
+
+    stockingGeoJSON.features.forEach(f => {
+      const name = f.properties?.name;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name: `${name} §${f.properties.section}`, type: 'Stocking Reach', feature: f, color: '#92400e' });
+    });
+
+    accessData?.features?.forEach(f => {
+      const p = f.properties;
+      const name = p?.SITE_NAME || p?.name || p?.ACCESS_NAME;
+      if (name && name.toLowerCase().includes(q))
+        results.push({ name, type: 'Access Point', feature: f, color: '#1d4ed8' });
+    });
+
+    return results.slice(0, 8);
+  }, [searchQuery, waterwayData, troutData, warmwaterData, accessData]);
 
   useEffect(() => {
     fetchCountyBoundaries().then(setCountyGeoJSON);
+  }, []);
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    function handleClick(e) {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setShowResults(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
   function toggleLayer(id) {
@@ -160,15 +352,115 @@ export default function MapView() {
   }
 
   const isVisible = (id) => layers.find((l) => l.id === id)?.visible;
+  const hl = county !== 'all';
+
+  // Highlight stocked water on click + show popup
+  const troutOnEachFeature = useCallback((feature, layer) => {
+    const name = feature.properties?.WATER_NAME || feature.properties?.name || 'Stocked Water';
+    if (name) layer.bindTooltip(name, { permanent: false, direction: 'top', className: 'text-xs' });
+
+    layer.on('click', (e) => {
+      // Reset the previously highlighted layer back to its normal style
+      if (selectedTroutLayerRef.current && selectedTroutLayerRef.current !== layer) {
+        const prev = selectedTroutLayerRef.current;
+        const prevGeom = prev.feature?.geometry?.type;
+        const s = makeStyles(hl);
+        prev.setStyle(
+          (prevGeom === 'Polygon' || prevGeom === 'MultiPolygon') ? s.troutLake : s.troutStream
+        );
+      }
+      // Apply highlight to clicked layer
+      selectedTroutLayerRef.current = layer;
+      const geomType = feature.geometry?.type;
+      layer.setStyle(
+        (geomType === 'Polygon' || geomType === 'MultiPolygon')
+          ? TROUT_HIGHLIGHT_POLY
+          : TROUT_HIGHLIGHT_LINE
+      );
+      // Show popup
+      L.popup({ maxWidth: 320 })
+        .setLatLng(e.latlng)
+        .setContent(buildPopupHTML(feature.properties))
+        .openOn(e.target._map);
+    });
+  }, [hl]);
+
+  // Fly to a spot from the FishingSpotsList
+  function handleSpotClick(feature) {
+    const target = getFeatureTarget(feature);
+    if (target) setFlyTarget({ ...target, _id: Date.now() });
+    // If it's a trout feature, highlight it on the map too
+    // (the GeoJSON layer ref isn't directly accessible here, so we rely on
+    //  the user clicking the feature on the map for the highlight effect)
+  }
 
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center gap-3 flex-wrap flex-shrink-0">
-        <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">County:</span>
-        <CountyFilter selected={county} onChange={setCounty} />
-        {waterwaysLoading && (
-          <span className="text-xs text-blue-600 ml-auto animate-pulse">Loading waterways…</span>
+      <div className="bg-white border-b border-gray-200 px-2 py-1.5 sm:px-3 sm:py-2 flex flex-wrap items-center gap-2 flex-shrink-0">
+
+        {/* Search */}
+        <div ref={searchRef} className="relative flex-1 min-w-[140px] sm:min-w-[180px] max-w-sm">
+          <div className="relative">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search streams, lakes, access points…"
+              value={searchQuery}
+              onChange={e => { setSearchQuery(e.target.value); setShowResults(true); }}
+              onFocus={() => setShowResults(true)}
+              className="w-full pl-8 pr-7 py-2 sm:py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(''); setShowResults(false); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs leading-none"
+                title="Clear search"
+              >✕</button>
+            )}
+          </div>
+
+          {/* Dropdown results */}
+          {showResults && searchQuery.length >= 2 && (
+            <div className="absolute top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-md shadow-lg z-[2000] max-h-60 overflow-y-auto">
+              {searchResults.length > 0 ? searchResults.map((r, i) => (
+                <button
+                  key={i}
+                  className="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center gap-2 border-b border-gray-100 last:border-0"
+                  onClick={() => {
+                    const target = getFeatureTarget(r.feature);
+                    if (target) setFlyTarget({ ...target, _id: Date.now() });
+                    setShowResults(false);
+                    setSearchQuery(r.name);
+                  }}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: r.color }} />
+                  <span className="text-sm text-gray-800 flex-1 truncate">{r.name}</span>
+                  <span className="text-xs text-gray-400 flex-shrink-0 ml-2">{r.type}</span>
+                </button>
+              )) : (
+                <div className="px-3 py-2 text-sm text-gray-500">No results — try a different name</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Divider */}
+        <div className="hidden sm:block h-5 w-px bg-gray-200 flex-shrink-0" />
+
+        {/* County filter */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-xs text-gray-500 font-medium whitespace-nowrap hidden sm:inline">Zoom to county:</span>
+          <CountyFilter selected={county} onChange={setCounty} />
+        </div>
+
+        {/* Loading indicator */}
+        {loadingIds.length > 0 && (
+          <span className="ml-auto text-xs text-blue-500 animate-pulse flex-shrink-0 whitespace-nowrap">
+            Loading…
+          </span>
         )}
       </div>
 
@@ -180,6 +472,7 @@ export default function MapView() {
           className="h-full w-full"
         >
           <FlyToCounty county={county} />
+          <FlyToTarget target={flyTarget} />
 
           {/* OSM base layer */}
           <TileLayer
@@ -187,6 +480,49 @@ export default function MapView() {
             attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             maxZoom={19}
           />
+
+          {/* Public Lands (Game Lands, State Forests, State Parks) */}
+          {isVisible('publicLands') && publicLandsData?.features?.length > 0 && (
+            <GeoJSON
+              key={`publicLands-${county}-${publicLandsData.features.length}`}
+              data={publicLandsData}
+              style={makeGetPublicLandStyle(hl)}
+              onEachFeature={publicLandOnEachFeature}
+            />
+          )}
+
+          {/* PFBC Public Fishing Easements */}
+          {isVisible('fishingEasements') && easementsData?.features?.length > 0 && (
+            <GeoJSON
+              key={`easements-${county}-${easementsData.features.length}`}
+              data={easementsData}
+              style={makeGetEasementStyle(hl)}
+              onEachFeature={(feature, layer) => {
+                const p = feature.properties;
+                const name = p?.name || 'PFBC Fishing Easement';
+                layer.bindTooltip(name, { permanent: false, direction: 'top', className: 'text-xs' });
+                layer.on('click', function (e) {
+                  L.popup({ maxWidth: 320 })
+                    .setLatLng(e.latlng)
+                    .setContent(`
+                      <div style="min-width:210px;max-width:290px;font-family:system-ui,sans-serif">
+                        <h3 style="font-weight:700;color:#581c87;font-size:14px;margin:0 0 6px">${name}</h3>
+                        <span style="background:#f3e8ff;color:#7e22ce;font-size:11px;padding:2px 8px;border-radius:999px">PFBC Public Fishing Easement</span>
+                        ${p?.description ? `<p style="font-size:11px;color:#374151;margin:6px 0 4px">${p.description}</p>` : ''}
+                        ${p?.targetSpecies ? `<p style="font-size:11px;color:#374151;margin:2px 0"><b>Target species:</b> ${p.targetSpecies}</p>` : ''}
+                        ${p?.permitRequired ? `<p style="font-size:11px;color:#b45309;font-weight:600;margin:4px 0">&#9888; ${p.permitRequired}</p>` : ''}
+                        <a href="${p?.pfbcLink || 'https://www.pa.gov/agencies/fishandboat/fishing/regulations'}"
+                           target="_blank" rel="noopener noreferrer"
+                           style="display:inline-block;margin-top:6px;font-size:11px;color:#7e22ce;font-weight:600;text-decoration:none">
+                          View PFBC Info &#8599;
+                        </a>
+                      </div>
+                    `)
+                    .openOn(e.target._map);
+                });
+              }}
+            />
+          )}
 
           {/* USGS NHD: cached tile layer (background) */}
           {isVisible('nhd') && (
@@ -233,20 +569,256 @@ export default function MapView() {
             <GeoJSON
               key={`osm-${county}-${waterwayData.features?.length}`}
               data={waterwayData}
-              style={getWaterwayStyle}
+              style={makeGetWaterwayStyle(hl)}
               onEachFeature={waterwayOnEachFeature}
             />
           )}
 
-          {/* Stocked Trout Waters (PASDA) */}
+          {/* Stocked Trout Waters (PASDA) — click to highlight */}
           {isVisible('troutWaters') && troutData && troutData.features?.length > 0 && (
             <GeoJSON
               key={`trout-${county}-${troutData.features.length}`}
               data={troutData}
-              style={getTroutStyle}
-              onEachFeature={waterwayOnEachFeature}
+              style={makeGetTroutStyle(hl)}
+              onEachFeature={troutOnEachFeature}
             />
           )}
+
+          {/* Warmwater / Coolwater Streams (PASDA Layer 28) */}
+          {isVisible('warmwaterStreams') && warmwaterData?.features?.length > 0 && (
+            <GeoJSON
+              key={`warmwater-${county}-${warmwaterData.features.length}`}
+              data={warmwaterData}
+              style={makeGetWarmwaterStyle(hl)}
+              onEachFeature={(feature, layer) => {
+                const p = feature.properties;
+                const name = p?.WATER_NAME || 'Warmwater Stream';
+                const countyName = p?.COUNTY || '';
+                const species = getWarmwaterSpecies(p);
+                if (name) layer.bindTooltip(name, { permanent: false, direction: 'top', className: 'text-xs' });
+                layer.on('click', (e) => {
+                  const speciesHTML = species.length
+                    ? `<p style="font-size:11px;color:#374151;margin:4px 0 2px"><b>Species:</b></p>
+                       <div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">${species.map(s =>
+                         `<span style="background:#d1fae5;color:#065f46;font-size:10px;padding:1px 6px;border-radius:999px">${s}</span>`
+                       ).join('')}</div>`
+                    : '';
+                  L.popup({ maxWidth: 320 })
+                    .setLatLng(e.latlng)
+                    .setContent(`
+                      <div style="min-width:210px;max-width:290px;font-family:system-ui,sans-serif">
+                        <h3 style="font-weight:700;color:#065f46;font-size:14px;margin:0 0 4px">${name}</h3>
+                        <span style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 8px;border-radius:999px">PFBC Warmwater / Coolwater Stream</span>
+                        ${countyName ? `<p style="font-size:11px;color:#6b7280;margin:4px 0 2px">${countyName} County</p>` : ''}
+                        ${speciesHTML}
+                        <a href="https://www.pa.gov/agencies/fishandboat/fishing/regulations"
+                           target="_blank" rel="noopener noreferrer"
+                           style="display:inline-block;margin-top:4px;font-size:11px;color:#059669;font-weight:600;text-decoration:none">
+                          PFBC Regulations &#8599;
+                        </a>
+                      </div>
+                    `)
+                    .openOn(e.target._map);
+                });
+              }}
+            />
+          )}
+
+          {/* PFBC Stocking Reaches (2026) — lines + midpoint markers */}
+          {isVisible('stockingReaches') && (() => {
+            const features = stockingGeoJSON.features;
+            if (!features.length) return null;
+
+            // Build popup HTML for a stocking reach
+            function stockingPopupHTML(p) {
+              const speciesColors = { Brown: '#92400e', Rainbow: '#0369a1', Golden: '#ca8a04', Steelhead: '#7e22ce' };
+              const speciesTags = p.allSpecies.map(s =>
+                `<span style="background:${speciesColors[s] || '#374151'}22;color:${speciesColors[s] || '#374151'};font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid ${speciesColors[s] || '#374151'}44">${s} Trout</span>`
+              ).join(' ');
+              const eventRows = p.stockingEvents.map(ev => {
+                const d = new Date(ev.date + 'T12:00:00');
+                const fmt = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                return `<tr><td style="padding:2px 6px 2px 0;color:#374151">${fmt}</td><td style="padding:2px 0;color:#6b7280">${ev.species.join(', ')}</td></tr>`;
+              }).join('');
+              const reachLabel = p.isPoint ? p.name : `${p.name} — Section ${p.section}`;
+              const limitsHTML = p.isPoint ? '' : `
+                <p style="font-size:10px;color:#6b7280;margin:4px 0 1px"><b>Upper:</b> ${p.upperDesc}</p>
+                <p style="font-size:10px;color:#6b7280;margin:0 0 4px"><b>Lower:</b> ${p.lowerDesc}</p>`;
+              return `
+                <div style="min-width:210px;max-width:300px;font-family:system-ui,sans-serif">
+                  <h3 style="font-weight:700;color:#78350f;font-size:13px;margin:0 0 4px">${reachLabel}</h3>
+                  <div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px">${speciesTags}</div>
+                  ${limitsHTML}
+                  <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:4px">
+                    <thead><tr style="border-bottom:1px solid #e5e7eb">
+                      <th style="text-align:left;padding:2px 6px 2px 0;color:#9ca3af;font-weight:600">Stocking Date</th>
+                      <th style="text-align:left;padding:2px 0;color:#9ca3af;font-weight:600">Species</th>
+                    </tr></thead>
+                    <tbody>${eventRows}</tbody>
+                  </table>
+                  <p style="font-size:10px;color:#6b7280;margin:2px 0"><b>Regulation:</b> ${p.regulation}</p>
+                  <p style="font-size:10px;color:#6b7280;margin:2px 0"><b>Meeting place:</b> ${p.meetingPlace}</p>
+                  <p style="font-size:10px;color:#6b7280;margin:2px 0"><b>Hatchery:</b> ${p.hatchery}</p>
+                  <a href="https://www.pa.gov/agencies/fishandboat/fishing/trout-stocking" target="_blank" rel="noopener noreferrer"
+                     style="display:inline-block;margin-top:5px;font-size:11px;color:#92400e;font-weight:600;text-decoration:none">
+                    PFBC Stocking Info &#8599;
+                  </a>
+                </div>`;
+            }
+
+            return (
+              <>
+                {/* Line segments for stream reaches */}
+                <GeoJSON
+                  key="stocking-lines"
+                  data={{ type: 'FeatureCollection', features: features.filter(f => f.geometry.type === 'LineString') }}
+                  style={(feature) => {
+                    const color = SPECIES_COLORS[feature.properties.primarySpecies] || '#92400e';
+                    return { color, weight: hl ? 5 : 3, opacity: 0.9, dashArray: '10 5' };
+                  }}
+                  onEachFeature={(feature, layer) => {
+                    layer.bindTooltip(`${feature.properties.name} §${feature.properties.section} — Stocked ${feature.properties.allSpecies.join('/')} Trout`, { direction: 'top', className: 'text-xs' });
+                    layer.on('click', e => {
+                      L.popup({ maxWidth: 340 }).setLatLng(e.latlng).setContent(stockingPopupHTML(feature.properties)).openOn(e.target._map);
+                    });
+                  }}
+                />
+                {/* Midpoint markers for reaches + point markers for ponds */}
+                {features.map((feature, i) => {
+                  const p = feature.properties;
+                  return (
+                    <Marker
+                      key={`stocking-marker-${i}`}
+                      position={[p.midLat, p.midLng]}
+                      icon={makeStockingIcon(p.primarySpecies)}
+                    >
+                      <Popup maxWidth={340}>
+                        <div dangerouslySetInnerHTML={{ __html: stockingPopupHTML(p) }} />
+                      </Popup>
+                    </Marker>
+                  );
+                })}
+              </>
+            );
+          })()}
+
+          {/* Class A Wild Trout Streams — NW Region */}
+          {isVisible('classAWildTrout') && classAWildTroutGeoJSON.features.map((feature, i) => {
+            const [lng, lat] = feature.geometry.coordinates;
+            const p = feature.properties;
+            const color = CLASS_A_FISHERY_COLORS[p.fishery] || '#0d9488';
+            const classAIcon = L.divIcon({
+              className: '',
+              html: `<div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:13px solid ${color};filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5))"></div>`,
+              iconSize: [14, 13],
+              iconAnchor: [7, 13],
+              popupAnchor: [0, -14],
+            });
+            const publicBadge = p.pctPublic >= 50
+              ? `<span style="background:#d1fae5;color:#065f46;font-size:10px;padding:1px 7px;border-radius:999px">${p.pctPublic}% public land</span>`
+              : p.pctPublic > 0
+                ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 7px;border-radius:999px">${p.pctPublic}% public land</span>`
+                : `<span style="background:#fee2e2;color:#991b1b;font-size:10px;padding:1px 7px;border-radius:999px">Private — get permission</span>`;
+            return (
+              <Marker key={`classA-${i}`} position={[lat, lng]} icon={classAIcon}>
+                <Popup maxWidth={310}>
+                  <div style={{ fontFamily: 'system-ui,sans-serif', fontSize: '13px', maxWidth: 290 }}>
+                    <h3 style={{ fontWeight: 700, color: '#134e4a', margin: '0 0 4px', fontSize: '13px' }}>
+                      {p.name} §{p.section}
+                    </h3>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                      <span style={{ background: `${color}22`, color, fontSize: '10px', padding: '2px 8px', borderRadius: 999, border: `1px solid ${color}55` }}>
+                        Class A Wild Trout — {p.fishery}
+                      </span>
+                      <span style={{ background: '#f1f5f9', color: '#475569', fontSize: '10px', padding: '2px 8px', borderRadius: 999 }}>
+                        {p.county} County
+                      </span>
+                    </div>
+                    <p style={{ margin: '4px 0 2px', fontSize: '11px', color: '#374151' }}>
+                      <b>Section:</b> {p.sectionLimits}
+                    </p>
+                    <p style={{ margin: '2px 0 4px', fontSize: '11px', color: '#374151' }}>
+                      <b>Length:</b> {p.lengthMi} miles
+                    </p>
+                    <div style={{ margin: '4px 0' }}>{publicBadge}</div>
+                    <p style={{ margin: '6px 0 4px', fontSize: '11px', color: '#166534', fontWeight: 600 }}>
+                      No stocking — naturally reproducing wild trout only.
+                    </p>
+                    {p.note && <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#6b7280', fontStyle: 'italic' }}>{p.note}</p>}
+                    <a href="https://www.pa.gov/agencies/fishandboat/fishing/class-a-wild-trout-streams"
+                       target="_blank" rel="noopener noreferrer"
+                       style={{ display: 'inline-block', marginTop: 6, fontSize: '11px', color: '#0f766e', fontWeight: 600, textDecoration: 'none' }}>
+                      PFBC Class A Info &#8599;
+                    </a>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+
+          {/* Erie Tributary Access Points — FishUSA Maps 5–12 */}
+          {isVisible('erieTribAccess') && erieTribAccessGeoJSON.features.map((feature, i) => {
+            const [lng, lat] = feature.geometry.coordinates;
+            const p = feature.properties;
+            const meta = ACCESS_TYPE_META[p.type] || { color: '#0891b2', label: p.type };
+            const isWaterfall = p.type === 'Waterfall';
+            const tribIcon = L.divIcon({
+              className: '',
+              html: isWaterfall
+                ? `<div style="display:flex;align-items:center;justify-content:center;background:${meta.color};border:2px solid white;border-radius:3px;width:20px;height:20px;box-shadow:0 1px 4px rgba(0,0,0,0.6);font-size:13px;line-height:1">💧</div>`
+                : `<div style="background:${meta.color};border:2px solid white;border-radius:50%;width:11px;height:11px;box-shadow:0 1px 4px rgba(0,0,0,0.55)"></div>`,
+              iconSize:   isWaterfall ? [20, 20] : [11, 11],
+              iconAnchor: isWaterfall ? [10, 10] : [5, 5],
+              popupAnchor: [0, isWaterfall ? -12 : -9],
+            });
+            return (
+              <Marker key={`trib-${i}`} position={[lat, lng]} icon={tribIcon}>
+                <Popup maxWidth={310}>
+                  <div style={{ fontFamily: 'system-ui,sans-serif', fontSize: '13px', maxWidth: 290 }}>
+                    <h3 style={{ fontWeight: 700, color: '#164e63', margin: '0 0 5px', fontSize: '13px' }}>{p.name}</h3>
+                    <span style={{ background: `${meta.color}22`, color: meta.color, fontSize: '10px', padding: '2px 8px', borderRadius: 999, border: `1px solid ${meta.color}55` }}>{meta.label}</span>
+                    {p.creek && <p style={{ margin: '5px 0 2px', fontSize: '11px', color: '#374151' }}><b>Creek:</b> {p.creek}</p>}
+                    {p.area && <p style={{ margin: '2px 0 4px', fontSize: '11px', color: '#6b7280' }}>{p.area}</p>}
+                    {p.description && <p style={{ margin: '5px 0 3px', fontSize: '11px', color: '#374151' }}>{p.description}</p>}
+                    {p.targetSpecies && <p style={{ margin: '3px 0', fontSize: '11px', color: '#374151' }}><b>Target species:</b> {p.targetSpecies}</p>}
+                    {p.permitRequired && <p style={{ margin: '4px 0', fontSize: '11px', color: '#b45309', fontWeight: 600 }}>&#9888; {p.permitRequired}</p>}
+                    {p.notes && <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#6b7280', fontStyle: 'italic' }}>{p.notes}</p>}
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+
+          {/* Local Fly Shops & Tackle Shops */}
+          {isVisible('localShops') && localShopsGeoJSON.features.map((feature, i) => {
+            const [lng, lat] = feature.geometry.coordinates;
+            const p = feature.properties;
+            const shopIcon = L.divIcon({
+              className: '',
+              html: `<div style="display:flex;align-items:center;justify-content:center;background:#be185d;border:2px solid white;border-radius:4px;width:22px;height:22px;box-shadow:0 1px 4px rgba(0,0,0,0.55);font-size:13px;line-height:1">${p.icon}</div>`,
+              iconSize: [22, 22],
+              iconAnchor: [11, 11],
+              popupAnchor: [0, -13],
+            });
+            return (
+              <Marker key={`shop-${i}`} position={[lat, lng]} icon={shopIcon}>
+                <Popup maxWidth={310}>
+                  <div style={{ fontFamily: 'system-ui,sans-serif', fontSize: '13px', maxWidth: 290 }}>
+                    <h3 style={{ fontWeight: 700, color: '#831843', margin: '0 0 4px', fontSize: '13px' }}>{p.name}</h3>
+                    <span style={{ background: '#fce7f3', color: '#be185d', fontSize: '10px', padding: '2px 8px', borderRadius: 999, border: '1px solid #fbcfe8' }}>{p.type}</span>
+                    <p style={{ margin: '6px 0 2px', fontSize: '11px', color: '#374151' }}>{p.description}</p>
+                    <p style={{ margin: '4px 0 2px', fontSize: '11px', color: '#374151' }}><b>Species:</b> {p.species}</p>
+                    <p style={{ margin: '2px 0 2px', fontSize: '11px', color: '#6b7280' }}>{p.address}</p>
+                    <p style={{ margin: '2px 0 4px', fontSize: '11px', color: '#6b7280' }}>{p.phone}</p>
+                    <a href={p.website} target="_blank" rel="noopener noreferrer"
+                       style={{ display: 'inline-block', fontSize: '11px', color: '#be185d', fontWeight: 600, textDecoration: 'none' }}>
+                      Visit Website &#8599;
+                    </a>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
 
           {/* PFBC Access Points */}
           {isVisible('accessPoints') &&
@@ -255,7 +827,7 @@ export default function MapView() {
               const p = feature.properties;
               const name =
                 p?.SITE_NAME || p?.name || p?.Name || p?.ACCESS_NAME || 'Access Point';
-              const county = p?.COUNTY || p?.county || p?.County || '';
+              const countyName = p?.COUNTY || p?.county || p?.County || '';
               const type = p?.ACCESS_TYPE || p?.type || p?.Type || '';
               const waterBody = p?.WATERWAY || p?.waterBody || p?.WaterBody || '';
               const facilities = p?.facilities || p?.Facilities || '';
@@ -273,9 +845,9 @@ export default function MapView() {
                           <b>Water:</b> {waterBody}
                         </p>
                       )}
-                      {county && (
+                      {countyName && (
                         <p style={{ margin: '0 0 2px', color: '#6b7280', fontSize: '11px' }}>
-                          {county} County
+                          {countyName} County
                         </p>
                       )}
                       {type && (
@@ -308,45 +880,23 @@ export default function MapView() {
             })}
         </MapContainer>
 
-        {/* Layer Controls overlay */}
-        <div className="absolute bottom-10 right-2 z-[1000]">
-          <LayerControls layers={layers} onToggle={toggleLayer} />
-        </div>
+        {/* Combined layers + legend sidebar */}
+        <MapSidebar
+          open={sidebarOpen}
+          onToggle={() => setSidebarOpen(v => !v)}
+          layers={layers}
+          onLayerToggle={toggleLayer}
+          loadingIds={loadingIds}
+          errorIds={errorIds}
+        />
 
-        {/* Legend */}
-        <div className="absolute bottom-10 left-2 z-[1000] bg-white rounded shadow p-2 text-xs space-y-1.5">
-          <p className="font-semibold text-gray-700 uppercase tracking-wide text-xs mb-1">
-            Legend
-          </p>
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-5 h-0.5 bg-blue-400" />
-            <span className="text-gray-600">Rivers / Streams (OSM)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-4 h-3 bg-blue-300 border border-blue-500 rounded-sm" />
-            <span className="text-gray-600">Lakes / Ponds</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block w-5 h-0"
-              style={{
-                borderTop: '2px dashed #0d9488',
-                display: 'inline-block',
-                width: 20,
-                height: 0,
-              }}
-            />
-            <span className="text-gray-600">Stocked Trout Waters</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-3 h-3 bg-blue-700 rounded-full border-2 border-white shadow" />
-            <span className="text-gray-600">PFBC Access Point</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-5 border-t-2 border-dashed border-blue-800" />
-            <span className="text-gray-600">County Boundary</span>
-          </div>
-        </div>
+        {/* Fishing Spots list panel (left side) */}
+        <FishingSpotsList
+          troutData={troutData}
+          accessData={accessData}
+          easementsData={easementsData}
+          onSpotClick={handleSpotClick}
+        />
       </div>
     </div>
   );
