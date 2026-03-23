@@ -36,6 +36,29 @@ const PHASE_LABELS = {
   off:    'Off Season',
 };
 
+// USGS real-time streamflow gauges for Erie tribs
+// Site numbers from waterdata.usgs.gov
+const GAUGES = [
+  {
+    name: 'Elk Creek at Girard',
+    siteNo: '04213000',
+    url: 'https://waterdata.usgs.gov/monitoring-location/04213000/#parameterCode=00060&period=P7D',
+    stream: 'Elk Creek',
+  },
+  {
+    name: 'Walnut Creek near Fairview',
+    siteNo: '04212100',
+    url: 'https://waterdata.usgs.gov/monitoring-location/04212100/#parameterCode=00060&period=P7D',
+    stream: 'Walnut Creek',
+  },
+  {
+    name: 'Conneaut Creek at Conneautville',
+    siteNo: '04212500',
+    url: 'https://waterdata.usgs.gov/monitoring-location/04212500/#parameterCode=00060&period=P7D',
+    stream: 'Conneaut Creek',
+  },
+];
+
 const STREAMS = [
   {
     name: 'Elk Creek',
@@ -44,6 +67,8 @@ const STREAMS = [
     public: 'PFBC access at mouth — most bank above is private',
     note: 'One of the top steelhead streams in PA. High fish counts after rain. C&R fly-fishing section upstream.',
     peak: 'Nov–Jan',
+    gaugeUrl: 'https://waterdata.usgs.gov/monitoring-location/04213000/#parameterCode=00060&period=P7D',
+    gaugeName: 'USGS 04213000 — Elk Cr at Girard',
   },
   {
     name: 'Walnut Creek',
@@ -52,6 +77,8 @@ const STREAMS = [
     public: 'Extensive PFBC easements — good bank access',
     note: 'Excellent public access via easements. Premier steelhead fishery with good numbers of fish and less pressure than Elk.',
     peak: 'Nov–Jan',
+    gaugeUrl: 'https://waterdata.usgs.gov/monitoring-location/04212100/#parameterCode=00060&period=P7D',
+    gaugeName: 'USGS 04212100 — Walnut Cr near Fairview',
   },
   {
     name: 'Conneaut Creek',
@@ -60,6 +87,8 @@ const STREAMS = [
     public: 'Some PA PFBC access; check OH regulations near border',
     note: 'Larger volume creek — later peaks. Fewer anglers, bigger fish possible. Verify which state rules apply near border.',
     peak: 'Nov–Feb',
+    gaugeUrl: 'https://waterdata.usgs.gov/monitoring-location/04212500/#parameterCode=00060&period=P7D',
+    gaugeName: 'USGS 04212500 — Conneaut Cr at Conneautville',
   },
   {
     name: 'Twenty Mile Creek',
@@ -68,6 +97,8 @@ const STREAMS = [
     public: 'North East Township access; marina parking',
     note: 'Near North East PA. Smaller trib but productive after rain. Less crowded alternative.',
     peak: 'Oct–Dec',
+    gaugeUrl: null,
+    gaugeName: null,
   },
   {
     name: 'Twelve Mile Creek',
@@ -76,6 +107,8 @@ const STREAMS = [
     public: 'Limited access — check before visiting',
     note: 'Smaller system. Fish fast after rain before water drops.',
     peak: 'Oct–Nov',
+    gaugeUrl: null,
+    gaugeName: null,
   },
 ];
 
@@ -85,7 +118,7 @@ const TRIGGERS = [
     label: 'Rainfall',
     color: '#1d4ed8',
     bg: '#eff6ff',
-    desc: 'The single most important trigger. A 0.5–1"+ rain raising stream levels will push waves of fish from the lake into the tribs within 24–48 hours. Watch creek gauges at USGS — falling but elevated flows are prime.',
+    desc: 'The single most important trigger. A 0.5–1"+ rain raising stream levels will push waves of fish from the lake into the tribs within 24–48 hours. Falling but still elevated flows are prime — check gauges below before driving out.',
   },
   {
     icon: '🌡️',
@@ -122,6 +155,50 @@ export default function SteelheadGuide() {
           PA Fishing License and Trout/Salmon Permit. Permit cost: $9.97 (resident).
           Rainbow/steelhead: 7" min, 5/day (regular season) · 3/day (extended).
         </div>
+      </div>
+
+      {/* USGS Live Gauge Links */}
+      <div className="bg-blue-950 rounded-lg p-3">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-bold text-white">📡 USGS Real-Time Stream Gauges</h3>
+          <a
+            href="https://waterwatch.usgs.gov/?id=ww_current"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-blue-300 hover:text-blue-100 underline"
+          >
+            WaterWatch map ↗
+          </a>
+        </div>
+        <p className="text-xs text-blue-300 mb-3">
+          Check flow before you go — rising or falling-but-elevated flows trigger the best runs.
+          Opens 7-day hydrograph on USGS site.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {GAUGES.map(g => (
+            <a
+              key={g.siteNo}
+              href={g.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col gap-0.5 bg-blue-900 hover:bg-blue-800 rounded-lg px-3 py-2.5 transition-colors group"
+            >
+              <span className="text-xs font-bold text-white group-hover:text-blue-200">
+                {g.stream} ↗
+              </span>
+              <span className="text-xs text-blue-400 font-mono">#{g.siteNo}</span>
+              <span className="text-xs text-blue-300">{g.name}</span>
+            </a>
+          ))}
+        </div>
+        <a
+          href="https://dashboard.waterdata.usgs.gov/app/nwd/?region=us&aoi=default"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block mt-2 text-xs text-blue-400 hover:text-blue-200 underline"
+        >
+          USGS National Water Dashboard — all PA gauges ↗
+        </a>
       </div>
 
       {/* Monthly Run Intensity chart */}
@@ -209,7 +286,17 @@ export default function SteelheadGuide() {
               <p className="text-xs text-gray-600 mb-1">
                 <span className="font-semibold">Access:</span> {s.public}
               </p>
-              <p className="text-xs text-gray-600">{s.note}</p>
+              <p className="text-xs text-gray-600 mb-2">{s.note}</p>
+              {s.gaugeUrl && (
+                <a
+                  href={s.gaugeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  📡 {s.gaugeName} ↗
+                </a>
+              )}
             </div>
           ))}
         </div>
