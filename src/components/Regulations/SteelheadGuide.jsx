@@ -1,3 +1,5 @@
+import ConditionsCard from './ConditionsCard';
+
 // Erie, PA Steelhead Run Guide
 // Based on PFBC data and regional angler knowledge for Lake Erie tribs
 
@@ -300,6 +302,12 @@ export default function SteelheadGuide() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Conditions & crowd estimator */}
+      <div>
+        <h3 className="text-sm font-bold text-gray-800 mb-2">Conditions &amp; Crowd Estimator</h3>
+        <ConditionsCard />
       </div>
 
       {/* Winter fishing note */}
