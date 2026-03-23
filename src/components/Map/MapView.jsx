@@ -22,6 +22,7 @@ import { countyBounds, defaultView } from '../../data/countyBounds';
 import { specialWaterways } from '../../data/regulations2026';
 import { stockingGeoJSON, SPECIES_COLORS } from '../../data/stockingSchedule';
 import { erieTribAccessGeoJSON, ACCESS_TYPE_META } from '../../data/erieTribAccess';
+import { classAWildTroutGeoJSON, CLASS_A_FISHERY_COLORS } from '../../data/classAWildTrout';
 
 // Fix Leaflet default icon path issues with Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -260,6 +261,7 @@ export default function MapView() {
     { id: 'stockingReaches',  label: 'Stocking Reaches (2026)',     visible: true,  color: '#92400e' },
     { id: 'accessPoints',     label: 'Boat Launches & Access',      visible: true,  color: '#1d4ed8' },
     { id: 'erieTribAccess',   label: 'Erie Trib Access (Maps 5–12)', visible: true, color: '#0891b2' },
+    { id: 'classAWildTrout',  label: 'Class A Wild Trout Streams', visible: true,  color: '#0d9488' },
     { id: 'countyBounds',     label: 'County Boundaries',     visible: true,  color: '#1e40af' },
   ]);
 
@@ -697,6 +699,60 @@ export default function MapView() {
               </>
             );
           })()}
+
+          {/* Class A Wild Trout Streams — NW Region */}
+          {isVisible('classAWildTrout') && classAWildTroutGeoJSON.features.map((feature, i) => {
+            const [lng, lat] = feature.geometry.coordinates;
+            const p = feature.properties;
+            const color = CLASS_A_FISHERY_COLORS[p.fishery] || '#0d9488';
+            const classAIcon = L.divIcon({
+              className: '',
+              html: `<div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:13px solid ${color};filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5))"></div>`,
+              iconSize: [14, 13],
+              iconAnchor: [7, 13],
+              popupAnchor: [0, -14],
+            });
+            const publicBadge = p.pctPublic >= 50
+              ? `<span style="background:#d1fae5;color:#065f46;font-size:10px;padding:1px 7px;border-radius:999px">${p.pctPublic}% public land</span>`
+              : p.pctPublic > 0
+                ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 7px;border-radius:999px">${p.pctPublic}% public land</span>`
+                : `<span style="background:#fee2e2;color:#991b1b;font-size:10px;padding:1px 7px;border-radius:999px">Private — get permission</span>`;
+            return (
+              <Marker key={`classA-${i}`} position={[lat, lng]} icon={classAIcon}>
+                <Popup maxWidth={310}>
+                  <div style={{ fontFamily: 'system-ui,sans-serif', fontSize: '13px', maxWidth: 290 }}>
+                    <h3 style={{ fontWeight: 700, color: '#134e4a', margin: '0 0 4px', fontSize: '13px' }}>
+                      {p.name} §{p.section}
+                    </h3>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                      <span style={{ background: `${color}22`, color, fontSize: '10px', padding: '2px 8px', borderRadius: 999, border: `1px solid ${color}55` }}>
+                        Class A Wild Trout — {p.fishery}
+                      </span>
+                      <span style={{ background: '#f1f5f9', color: '#475569', fontSize: '10px', padding: '2px 8px', borderRadius: 999 }}>
+                        {p.county} County
+                      </span>
+                    </div>
+                    <p style={{ margin: '4px 0 2px', fontSize: '11px', color: '#374151' }}>
+                      <b>Section:</b> {p.sectionLimits}
+                    </p>
+                    <p style={{ margin: '2px 0 4px', fontSize: '11px', color: '#374151' }}>
+                      <b>Length:</b> {p.lengthMi} miles
+                    </p>
+                    <div style={{ margin: '4px 0' }}>{publicBadge}</div>
+                    <p style={{ margin: '6px 0 4px', fontSize: '11px', color: '#166534', fontWeight: 600 }}>
+                      No stocking — naturally reproducing wild trout only.
+                    </p>
+                    {p.note && <p style={{ margin: '4px 0 0', fontSize: '10px', color: '#6b7280', fontStyle: 'italic' }}>{p.note}</p>}
+                    <a href="https://www.pa.gov/agencies/fishandboat/fishing/class-a-wild-trout-streams"
+                       target="_blank" rel="noopener noreferrer"
+                       style={{ display: 'inline-block', marginTop: 6, fontSize: '11px', color: '#0f766e', fontWeight: 600, textDecoration: 'none' }}>
+                      PFBC Class A Info &#8599;
+                    </a>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
 
           {/* Erie Tributary Access Points — FishUSA Maps 5–12 */}
           {isVisible('erieTribAccess') && erieTribAccessGeoJSON.features.map((feature, i) => {
